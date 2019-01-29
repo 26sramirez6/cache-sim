@@ -12,33 +12,7 @@
 //}
 
 
-struct Context {
-	uint32_t nWay;
-	uint32_t cacheSize;
-	uint32_t blockSize;
-	uint32_t matDims;
-	uint32_t blockFactor;
-	bool logging;
-	std::string policy;
-	std::string algo;
-	Context(): nWay(2), cacheSize(65536),
-		blockSize(64), matDims(480),
-		blockFactor(32), logging(false),
-		policy("LRU"), algo("mxm_block") {};
-
-	uint32_t ComputeRAMSize() const {
-		uint32_t ret = 0;
-		if (this->policy=="mxm_block" || this->policy=="mxm") {
-			ret += this->matDims*this->matDims*sizeof(double)*3;
-		} else {
-			ret += this->matDims*sizeof(double)*3;
-		}
-		ret += (ret%blockSize);
-		return ret;
-	}
-};
-
-static void BuildContext(Context& c, int argc, char ** argv) {
+static void BuildConfiguration(CacheConfig& c, int argc, char ** argv) {
 	for (int i=1; i<argc; ++i) {
 		if (!strcmp(argv[i], "-p")) {
 			c.logging = true;
@@ -56,12 +30,15 @@ static void BuildContext(Context& c, int argc, char ** argv) {
 			c.algo = std::string(argv[i+1]);
 		}
 	}
+	c.ComputeRAMStats();
 }
 
 int main (int argc, char ** argv) {
-	Context c;
-	BuildContext(c, argc, argv);
-	CPU cpu(c.nWay, c.cacheSize, c.blockSize, c.ComputeRAMSize());
-	std::cout << "success\n";
+	CacheConfig c;
+	BuildConfiguration(c, argc, argv);
+	CPU cpu(c);
+	Address a(12345);
+	cpu.LoadDouble(a);
+	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }
