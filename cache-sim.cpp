@@ -1,6 +1,6 @@
 #include <sys/time.h>
 #include <unordered_map>
-
+#include <string.h>
 #include "cache.hpp"
 
 //typedef unsigned long long timestamp_t;
@@ -40,19 +40,19 @@ struct Context {
 
 static void BuildContext(Context& c, int argc, char ** argv) {
 	for (int i=1; i<argc; ++i) {
-		if (argv[i]=="-p") {
+		if (!strcmp(argv[i], "-p")) {
 			c.logging = true;
-		} else if (argv[i]=="-c") {
+		} else if (!strcmp(argv[i], "-c")) {
 			c.cacheSize = atoi(argv[i+1]);
-		} else if (argv[i]=="-n") {
+		} else if (!strcmp(argv[i], "-n")) {
 			c.nWay = atoi(argv[i+1]);
-		} else if (argv[i]=="-b") {
+		} else if (!strcmp(argv[i], "-b")) {
 			c.blockSize = atoi(argv[i+1]);
-		} else if (argv[i]=="-d") {
+		} else if (!strcmp(argv[i], "-d")) {
 			c.matDims = atoi(argv[i+1]);
-		} else if (argv[i]=="-r") {
+		} else if (!strcmp(argv[i],"-r")) {
 			c.policy = std::string(argv[i+1]);
-		} else if (argv[i]=="-a") {
+		} else if (!strcmp(argv[i],"-a")) {
 			c.algo = std::string(argv[i+1]);
 		}
 	}
