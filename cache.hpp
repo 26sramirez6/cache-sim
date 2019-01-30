@@ -12,6 +12,7 @@
 
 #define CACHE_DEBUG
 uint32_t constexpr ADDRLEN = 32;
+uint32_t constexpr MATS = 3;
 
 static inline uint32_t
 GetBitLength(uint32_t val) {
@@ -19,6 +20,7 @@ GetBitLength(uint32_t val) {
 	while (val &= ~(1<<ret++)) {}
 	return ret;
 }
+
 
 struct CacheConfig {
 	uint32_t nWay;
@@ -28,46 +30,45 @@ struct CacheConfig {
 	uint32_t blockFactor;
 	uint32_t cacheBlockCount;
 	uint32_t numSets;
-	uint32_t ramSize;
-	uint32_t wordsPerBlock;
 	bool logging;
 	std::string policy;
 	std::string algo;
 	uint32_t wordSize;
+	uint32_t ramSize;
 	uint32_t ramBlockCount;
+	uint32_t totalWords;
+	uint32_t wordsPerBlock;
 
 	CacheConfig(): nWay(2), cacheSize(65536),
 		blockSize(64), matDims(480),
 		blockFactor(32), logging(false),
 		policy("LRU"), algo("mxm_block"),
-		wordSize(sizeof(double)) {
+		wordSize(sizeof(double)), ramSize(0),
+		ramBlockCount(0), totalWords(0) {
 
 		this->cacheBlockCount = this->cacheSize / this->blockSize;
 		this->numSets = this->cacheSize / this->blockSize / this->nWay;
 		this->wordsPerBlock = this->blockSize / this->wordSize;
-
-		// initialized on ComputeRAMStats()
-		this->ramSize = 0;
-		this->ramBlockCount = 0;
 	};
 
 	void ComputeRAMStats() {
 		// can be re-called as needed
 		this->ramSize = 0;
 		this->ramBlockCount = 0;
-		if (this->policy=="mxm_block" || this->policy=="mxm") {
+		if (this->algo=="mxm_block" || this->algo=="mxm") {
 			this->ramSize += this->matDims*this->matDims*this->wordSize*3;
 		} else {
 			this->ramSize += this->matDims*this->wordSize*3;
 		}
 		this->ramSize += (this->ramSize%blockSize);
 		this->ramBlockCount = this->ramSize / this->blockSize;
+		this->totalWords = this->ramBlockCount * this->wordsPerBlock * MATS;
 	}
 };
 
 class Address {
 private:
-	uint32_t address_;
+	const uint32_t address_;
 
 	// field sizes in bits statically stored
 	// once cache size is known
@@ -78,7 +79,7 @@ private:
 	static uint32_t setFieldSize_;
 	static uint32_t cacheBlockFieldSize_;
 	static uint32_t ramBlockFieldSize_;
-	//static uint32_t
+
 	// masks for each field statically
 	// stored once cache size is known
 	static uint32_t byteMask_;
@@ -88,60 +89,79 @@ private:
 	static uint32_t setMask_;
 	static uint32_t cacheBlockMask_;
 	static uint32_t ramBlockMask_;
+
+	// right shift factors statically stored
+	static uint32_t wordShift_;
+	static uint32_t setShift_;
+	static uint32_t cacheBlockShift_;
+	static uint32_t tagShift_;
+	static uint32_t ramBlockShift_;
 public:
 
 #ifndef NDEBUG
-	Address(uint32_t address) : address_(address) { this->Assert(); }
+	Address(uint32_t address) : address_(address) {	this->Assert();	}
 #else
 	Address(uint32_t address) : address_(address) {}
 #endif
 
-	inline uint32_t GetTag() const {
-		return (this->address_&Address::tagMask_)>>
-				(Address::wordFieldSize_ + Address::indexFieldSize_);
+	Address (const Address& other) : address_(other.address_) {	}
+
+	Address (const Address&& other) : address_(std::move(other.address_)){ }
+
+	Address& operator=(const Address& other) = default;
+	Address& operator=(Address&& other) = default;
+
+	void PrintAddress() const {
+		std::cout << this->address_ << std::endl;
 	}
 
-	inline uint32_t GetIndex() const {
-		return (this->address_&Address::indexMask_)>>
-				(Address::wordFieldSize_);
+	const uint32_t GetTag() const {
+		return (this->address_&Address::tagMask_)>>Address::tagShift_;
 	}
 
-	inline uint32_t GetSet() const {
-		return (this->address_&Address::setMask_)>>
-				(Address::wordFieldSize_);
+	const uint32_t GetSet() const {
+		return (this->address_&Address::setMask_)>>Address::setShift_;
 	}
 
-	inline uint32_t GetCacheBlock() const {
-		return (this->address_&Address::cacheBlockMask_)>>
-				(Address::wordFieldSize_ + Address::setFieldSize_);
+	const uint32_t GetCacheFullIndex() const {
+		return (this->address_&Address::indexMask_)>>Address::setShift_;
 	}
 
-	inline uint32_t GetRamBlock() const {
-		return this->address_&Address::ramBlockMask_;
+	const uint32_t GetCacheBlock() const {
+		return (this->address_&Address::cacheBlockMask_)>>Address::cacheBlockShift_;
 	}
 
-	inline uint32_t GetWord() const {
-		return this->address_&Address::wordMask_;
+	const uint32_t GetRamBlock() const {
+		return (this->address_&Address::ramBlockMask_)>>Address::ramBlockShift_;
 	}
 
-	static void StaticInit(CacheConfig& config) {
+	const uint32_t GetWord() const {
+		return (this->address_&Address::wordMask_)>>Address::wordShift_;
+	}
+
+	static void StaticInit(const CacheConfig& config) {
 		indexFieldSize_ = GetBitLength(config.cacheBlockCount) - 1;
 		wordFieldSize_ = GetBitLength(config.wordsPerBlock) - 1;
 		setFieldSize_ = GetBitLength(config.numSets) - 1;
 		byteFieldSize_ = GetBitLength(config.wordSize) - 1;
 		ramBlockFieldSize_ = GetBitLength(config.ramBlockCount) - 1;
 		cacheBlockFieldSize_ = indexFieldSize_ - setFieldSize_;
-		tagFieldSize_ = ADDRLEN - indexFieldSize_ - wordFieldSize_;
+		tagFieldSize_ = ADDRLEN - indexFieldSize_ - wordFieldSize_ - byteFieldSize_;
 
 		byteMask_ = (1 << byteFieldSize_) - 1;
 		wordMask_ = ((1 << (wordFieldSize_ + byteFieldSize_)) - 1)&(~byteMask_);
 		indexMask_ = ((1 << (indexFieldSize_ + wordFieldSize_ + byteFieldSize_)) - 1)&(~(wordMask_|byteMask_));
 		tagMask_ = ~((1 << (ADDRLEN - tagFieldSize_)) - 1);
-		setMask_ = ((1 << (setFieldSize_ + wordFieldSize_)) - 1)&(~wordMask_);
-		cacheBlockMask_ = ~(setMask_|wordMask_|tagMask_);
+		setMask_ = ((1 << (setFieldSize_ + wordFieldSize_ + byteFieldSize_)) - 1)&(~(wordMask_|byteMask_));
+		cacheBlockMask_ = ~(byteMask_|wordMask_|setMask_|tagMask_);
 		ramBlockMask_ = ((1 << (byteFieldSize_ + wordFieldSize_ + ramBlockFieldSize_)) - 1)&
 				(~((1 << (byteFieldSize_ + wordFieldSize_)) - 1));
 
+		wordShift_ = byteFieldSize_;
+		setShift_ = wordFieldSize_ + byteFieldSize_;
+		cacheBlockShift_ = setShift_ + wordFieldSize_ + byteFieldSize_;
+		tagShift_ = setShift_ + wordFieldSize_ + byteFieldSize_ + cacheBlockShift_;
+		ramBlockShift_ = setShift_;
 
 #ifdef CACHE_DEBUG
 		std::cout << "byte mask:             " << std::bitset<ADDRLEN>(byteMask_) << std::endl;
@@ -152,9 +172,6 @@ public:
 		std::cout << "cache tag mask:        " << std::bitset<ADDRLEN>(tagMask_) << std::endl;
 		std::cout << "ram block mask:        " << std::bitset<ADDRLEN>(ramBlockMask_) << std::endl;
 #endif
-
-		assert(ADDRLEN > indexFieldSize_ + wordFieldSize_);
-		assert(setFieldSize_ + cacheBlockFieldSize_==indexFieldSize_);
 	}
 
 	static void Assert() {
@@ -180,6 +197,12 @@ uint32_t Address::cacheBlockMask_ = 0;
 uint32_t Address::setFieldSize_ = 0;
 uint32_t Address::cacheBlockFieldSize_ = 0;
 uint32_t Address::ramBlockFieldSize_ = 0;
+uint32_t Address::wordShift_ = 0;
+uint32_t Address::setShift_ = 0;
+uint32_t Address::cacheBlockShift_ = 0;
+uint32_t Address::tagShift_ = 0;
+uint32_t Address::ramBlockShift_ = 0;
+
 
 class DataBlock {
 private:
@@ -188,15 +211,14 @@ private:
 	std::vector<double> data_;
 public:
 
-#ifndef NDEBUG
 	DataBlock() : data_(size_) { assert(this->size_!=0); }
-#else
-	DataBlock() : data_(size_) {}
-#endif
 
-	inline double GetWord(uint32_t offset) { return this->data_[offset]; }
+	DataBlock(const DataBlock &db2) : data_(db2.data_) { }
 
-	static void StaticInit(CacheConfig& config) {
+	double GetWord(const uint32_t offset) const { return this->data_[offset]; }
+	void SetWord(const uint32_t offset, const double value) { this->data_[offset] = value; }
+
+	static void StaticInit(const CacheConfig& config) {
 		DataBlock::size_ = config.blockSize;
 		DataBlock::numWords_ = config.wordsPerBlock;
 	}
@@ -209,42 +231,45 @@ public:
 uint32_t DataBlock::size_ = 0;
 uint32_t DataBlock::numWords_ = 0;
 
+
 class RAM {
 private:
-	uint32_t size_;
+	const uint32_t size_;
 	std::vector<DataBlock> blocks_;
 public:
-	RAM(CacheConfig& config) : size_(config.ramSize), blocks_(config.ramBlockCount) {}
+	RAM(const CacheConfig& config) : size_(config.ramSize), blocks_(config.ramBlockCount) {}
 
-	DataBlock GetBlockCopy(Address& address) {
-		return blocks_[address.GetIndex()];
+	DataBlock GetBlockCopy(const Address& address) const {
+		return blocks_[address.GetRamBlock()];
 	}
 
-	void SetBlock(Address& address, std::unique_ptr<DataBlock> value) {
-
+	void SetWord(const Address& address, const uint32_t offset, const double val) {
+		this->blocks_[address.GetRamBlock()].SetWord(offset, val);
 	}
 };
 
 class Cache {
 private:
-	uint32_t nWay_;
-	uint32_t cacheSize_;
-	uint32_t blockSize_;
-	uint32_t numBlocks_;
-	uint32_t numSets_;
+	const uint32_t nWay_;
+	const uint32_t cacheSize_;
+	const uint32_t blockSize_;
+	const uint32_t numBlocks_;
+	const uint32_t numSets_;
 	RAM & ram_;
 
 	std::vector<std::vector<DataBlock> > blocks_;
 	std::vector<std::vector<bool> > valid_;
 	std::vector<std::vector<uint32_t> > tags_;
 
-	void RandomWrite(DataBlock& block, std::vector<DataBlock>& set) {
+	void RandomWrite(const DataBlock& block, const uint32_t setIndex) {
 		// randomly evict a block by overwrite
-		set[rand()%this->nWay_] = block;
+		int evict = rand()%this->nWay_;
+		this->blocks_[setIndex][evict] = block;
+		this->valid_[setIndex][evict] = true;
 	}
 
 public:
-	Cache(CacheConfig& config, RAM& ram) :
+	Cache(const CacheConfig& config, RAM& ram) :
 		nWay_(config.nWay), cacheSize_(config.cacheSize), blockSize_(config.blockSize),
 		numBlocks_(config.cacheBlockCount), numSets_(config.numSets), ram_(ram) {
 
@@ -254,50 +279,61 @@ public:
 		this->tags_.resize(this->numSets_, std::vector<uint32_t>(this->nWay_));
 	}
 
-	double GetDouble(Address& address) {
+	double GetDouble(const Address& address) {
 		uint32_t setIndex = address.GetSet();
-		uint32_t wordIndex = address.GetWord();
 		uint32_t tag = address.GetTag();
 		std::vector<DataBlock>& set = this->blocks_[setIndex];
 		std::vector<bool>& valids = this->valid_[setIndex];
 		std::vector<uint32_t>& tags = this->tags_[setIndex];
 
+		// cache search
 		for (uint32_t i=0; i<this->nWay_; ++i) {
 			if (valids[i] && tags[i]==tag) { // cache hit
-				return set[i].GetWord(wordIndex);
+				return set[i].GetWord(address.GetWord());
 			}
 		}
 		// cache miss: fetch from RAM.
-		// Note: I'm returning a new DataBlock object,
+		// Note: copy constructor is called.
 		// not a pointer to the one in RAM.
-		// this is to simulate the write from RAM to cache that occurs
-		// on a cache miss
 		DataBlock block = ram_.GetBlockCopy(address);
-		this->RandomWrite(block, set);
-		return block.GetWord(wordIndex);
+		this->RandomWrite(block, setIndex);
+		return block.GetWord(address.GetWord());
 	}
 
-	double SetDouble(Address& address, double val) {
-		return 1.;
-	}
+	void SetDouble(const Address& address, const double val) {
+		uint32_t setIndex = address.GetSet();
+		uint32_t tag = address.GetTag();
+		uint32_t wordIndex = address.GetWord();
+		std::vector<DataBlock>& set = this->blocks_[setIndex];
+		std::vector<bool>& valids = this->valid_[setIndex];
+		std::vector<uint32_t>& tags = this->tags_[setIndex];
 
-	DataBlock * GetBlock(Address& address) {
-		return nullptr;
-	}
+		// write through + write allocate:
+		// RAM needs to be updated no matter what
+		this->ram_.SetWord(address, val, wordIndex);
 
-	void SetBlock(Address& address, std::unique_ptr<DataBlock> block) {
+		// cache search
+		for (uint32_t i=0; i<this->nWay_; ++i) {
+			if (valids[i] && tags[i]==tag) { // cache hit
+				set[i].SetWord(wordIndex, val);
+				return;
+			}
+		}
 
+		// cache miss, bring in the new block from ram
+		DataBlock newBlock = this->ram_.GetBlockCopy(address);
+		this->RandomWrite(newBlock, setIndex);
 	}
 };
 
 
 class CPU {
 private:
-	std::unique_ptr<Cache> cache_;
 	std::unique_ptr<RAM> ram_;
+	std::unique_ptr<Cache> cache_;
 
 public:
-	CPU(CacheConfig& config) {
+	CPU(const CacheConfig& config) {
 		DataBlock::StaticInit(config);
 		Address::StaticInit(config);
 		this->ram_ = std::unique_ptr<RAM>{ new RAM(config) };
@@ -306,19 +342,19 @@ public:
 		};
 	}
 
-	double LoadDouble(Address& address) const {
-		return 1.;
+	double LoadDouble(const Address& address) {
+		return this->cache_->GetDouble(address);
 	}
 
 	void StoreDouble(Address& address, double value) {
-
+		this->cache_->SetDouble(address, value);
 	}
 
 	double AddDouble(double val1, double val2) const {
-		return 1.;
+		return val1 + val2;
 	}
 
 	double MultDouble(double val1, double val2) const {
-		return 1.;
+		return val1*val2;
 	}
 };

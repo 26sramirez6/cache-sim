@@ -33,16 +33,58 @@ static void BuildConfiguration(CacheConfig& c, int argc, char ** argv) {
 	c.ComputeRAMStats();
 }
 
+void daxpy (const CacheConfig& config) {
+	CPU cpu(config);
+	std::vector<Address> a;
+	std::vector<Address> b;
+	std::vector<Address> c;
+	int n = config.totalWords/3;
+	a.reserve(n);
+	b.reserve(n);
+	c.reserve(n);
+
+	for (int i=0;i<n;++i) {
+		a.push_back(Address(i*sizeof(double)));
+		b.push_back(Address((n+i)*sizeof(double)));
+		c.push_back(Address((2*n+i)*sizeof(double)));
+		cpu.StoreDouble(a[i], static_cast<double>(i));
+		cpu.StoreDouble(b[i], static_cast<double>(i)*2.);
+		cpu.StoreDouble(c[i], 0.);
+	}
+
+	double r0 = 3.;
+	double r1, r2, r3, r4;
+	for (int i=0; i<n; ++i) {
+		r1 = cpu.LoadDouble(a[i]);
+		r2 = cpu.MultDouble(r0, r1);
+		r3 = cpu.LoadDouble(b[i]);
+		r4 = cpu.AddDouble(r2, r3);
+		cpu.StoreDouble(c[i], r4);
+	}
+
+	for (int i=0; i<n; ++i) {
+		r1 = cpu.LoadDouble(a[i]);
+		r2 = cpu.MultDouble(r0, r1);
+		r3 = cpu.LoadDouble(b[i]);
+		r4 = cpu.AddDouble(r2, r3);
+		cpu.StoreDouble(c[i], r4);
+	}
+
+	for (int i=0; i<n; ++i) {
+		std::cout << cpu.LoadDouble(c[i]) << std::endl;
+	}
+}
+
 int main (int argc, char ** argv) {
 	CacheConfig c;
 	BuildConfiguration(c, argc, argv);
-	CPU cpu(c);
-	Address a(108504);
-	//cpu.LoadDouble(a);
-	std::cout << std::bitset<ADDRLEN>(108504) << std::endl;
-	std::cout << std::bitset<ADDRLEN>(a.GetIndex()) << std::endl;
-	std::cout << std::bitset<ADDRLEN>(a.GetCacheBlock()) << std::endl;
-	std::cout << std::bitset<ADDRLEN>(a.GetWord()) << std::endl;
+	daxpy(c);
+
+//	std::cout << std::bitset<ADDRLEN>(108504) << std::endl;
+//	std::cout << std::bitset<ADDRLEN>(a.GetCacheFullIndex()) << std::endl;
+//	std::cout << std::bitset<ADDRLEN>(a.GetCacheBlock()) << std::endl;
+//	std::cout << std::bitset<ADDRLEN>(a.GetWord()) << std::endl;
+//	std::cout << "cache-sim terminating\n";
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }
