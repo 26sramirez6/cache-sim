@@ -41,8 +41,8 @@ int main (int argc, char ** argv) {
 	//cpu.LoadDouble(a);
 	std::cout << std::bitset<ADDRLEN>(108504) << std::endl;
 	std::cout << std::bitset<ADDRLEN>(a.GetIndex()) << std::endl;
-	std::cout << std::bitset<ADDRLEN>(a.GetBlockWithinSet()) << std::endl;
-	std::cout << std::bitset<ADDRLEN>(a.GetWordWithinBlock()) << std::endl;
+	std::cout << std::bitset<ADDRLEN>(a.GetCacheBlock()) << std::endl;
+	std::cout << std::bitset<ADDRLEN>(a.GetWord()) << std::endl;
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }
