@@ -37,8 +37,12 @@ int main (int argc, char ** argv) {
 	CacheConfig c;
 	BuildConfiguration(c, argc, argv);
 	CPU cpu(c);
-	Address a(12345);
-	cpu.LoadDouble(a);
+	Address a(108504);
+	//cpu.LoadDouble(a);
+	std::cout << std::bitset<ADDRLEN>(108504) << std::endl;
+	std::cout << std::bitset<ADDRLEN>(a.GetIndex()) << std::endl;
+	std::cout << std::bitset<ADDRLEN>(a.GetBlockWithinSet()) << std::endl;
+	std::cout << std::bitset<ADDRLEN>(a.GetWordWithinBlock()) << std::endl;
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }

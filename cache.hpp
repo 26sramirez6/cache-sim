@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define CACHE_DEBUG;
+#define CACHE_DEBUG
 uint32_t constexpr ADDRLEN = 32;
 
 static inline uint32_t
@@ -74,7 +74,7 @@ private:
 	static uint32_t indexFieldSize_;
 	static uint32_t setFieldSize_;
 	static uint32_t blockWithinSetFieldSize_;
-
+	//static uint32_t
 	// masks for each field statically
 	// stored once cache size is known
 	static uint32_t tagMask_;
@@ -114,6 +114,10 @@ public:
 		return this->address_&Address::wordMask_;
 	}
 
+	inline uint32_t GetRamBlock() const {
+		return this->address_&Address::wordMask_;
+	}
+
 	static void StaticInit(CacheConfig& config) {
 		indexFieldSize_ = GetBitLength(config.numBlocks) - 1;
 		wordFieldSize_ = GetBitLength(config.wordsPerBlock) - 1;
@@ -127,6 +131,7 @@ public:
 		tagMask_ = ~((1 << (ADDRLEN - tagFieldSize_)) - 1);
 		setMask_ = ((1 << (setFieldSize_ + wordFieldSize_)) - 1)&(~wordMask_);
 		blockWithinSetMask_ = ~(setMask_|wordMask_|tagMask_);
+
 
 #ifdef CACHE_DEBUG
 		std::cout << "word mask:             " << std::bitset<ADDRLEN>(wordMask_) << std::endl;
