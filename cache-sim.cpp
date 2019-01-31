@@ -33,7 +33,7 @@ static void BuildConfiguration(CacheConfig& c, int argc, char ** argv) {
 	c.ComputeRAMStats();
 }
 
-void daxpy (const CacheConfig& config) {
+static void daxpy (const CacheConfig& config) {
 	CPU cpu(config);
 	std::vector<Address> a;
 	std::vector<Address> b;

@@ -115,27 +115,27 @@ public:
 		std::cout << this->address_ << std::endl;
 	}
 
-	const uint32_t GetTag() const {
+	uint32_t GetTag() const {
 		return (this->address_&Address::tagMask_)>>Address::tagShift_;
 	}
 
-	const uint32_t GetSet() const {
+	uint32_t GetSet() const {
 		return (this->address_&Address::setMask_)>>Address::setShift_;
 	}
 
-	const uint32_t GetCacheFullIndex() const {
+	uint32_t GetCacheFullIndex() const {
 		return (this->address_&Address::indexMask_)>>Address::setShift_;
 	}
 
-	const uint32_t GetCacheBlock() const {
+	uint32_t GetCacheBlock() const {
 		return (this->address_&Address::cacheBlockMask_)>>Address::cacheBlockShift_;
 	}
 
-	const uint32_t GetRamBlock() const {
+	uint32_t GetRamBlock() const {
 		return (this->address_&Address::ramBlockMask_)>>Address::ramBlockShift_;
 	}
 
-	const uint32_t GetWord() const {
+	uint32_t GetWord() const {
 		return (this->address_&Address::wordMask_)>>Address::wordShift_;
 	}
 
