@@ -41,20 +41,24 @@ struct CacheConfig {
 
 	CacheConfig(): nWay(2), cacheSize(65536),
 		blockSize(64), matDims(480),
-		blockFactor(32), logging(false),
-		policy("LRU"), algo("mxm_block"),
+		blockFactor(32), cacheBlockCount(0), numSets(0),
+		logging(false), policy("LRU"), algo("mxm_block"),
 		wordSize(sizeof(double)), ramSize(0),
-		ramBlockCount(0), totalWords(0) {
+		ramBlockCount(0), totalWords(0), wordsPerBlock(0) {	};
 
-		this->cacheBlockCount = this->cacheSize / this->blockSize;
-		this->numSets = this->cacheSize / this->blockSize / this->nWay;
-		this->wordsPerBlock = this->blockSize / this->wordSize;
-	};
-
-	void ComputeRAMStats() {
+	void ComputeStats() {
 		// can be re-called as needed
 		this->ramSize = 0;
 		this->ramBlockCount = 0;
+		this->cacheBlockCount = this->cacheSize / this->blockSize;
+		this->numSets = this->cacheSize / this->blockSize / this->nWay;
+		this->wordsPerBlock = this->blockSize / this->wordSize;
+		if (this->blockSize < sizeof(double)) {
+			std::cerr << "Block size cannot be less " \
+					"than double. Aborting.\n";
+			exit(1);
+		}
+
 		if (this->algo=="mxm_block" || this->algo=="mxm") {
 			this->ramSize += this->matDims*this->matDims*this->wordSize*3;
 		} else {
@@ -63,6 +67,20 @@ struct CacheConfig {
 		this->ramSize += (this->ramSize%blockSize);
 		this->ramBlockCount = this->ramSize / this->blockSize;
 		this->totalWords = this->ramBlockCount * this->wordsPerBlock * MATS;
+	}
+
+	void PrintStats() const {
+		std::cout << "INPUTS" << std::string(25, '=') << std::endl;
+		std::cout << "Ram Size: " << this->ramSize << std::endl;
+		std::cout << "Cache Size: " << this->cacheSize << std::endl;
+		std::cout << "Block Size: " << this->blockSize << std::endl;
+		std::cout << "Total Blocks in Cache: " << this->cacheBlockCount << std::endl;
+		std::cout << "Associativity: " << this->nWay << std::endl;
+		std::cout << "Number of Sets: " << this->numSets << std::endl;
+		std::cout << "Replacement Policy: " << this->policy << std::endl;
+		std::cout << "Algorithm: " << this->algo << std::endl;
+		std::cout << "MXM Blocking Factor: " << this->blockFactor << std::endl;
+		std::cout << "Matrix or Vector dimension: " << this->matDims << std::endl;
 	}
 };
 
@@ -172,15 +190,14 @@ public:
 		std::cout << "cache tag mask:        " << std::bitset<ADDRLEN>(tagMask_) << std::endl;
 		std::cout << "ram block mask:        " << std::bitset<ADDRLEN>(ramBlockMask_) << std::endl;
 #endif
+		Address::Assert();
 	}
 
 	static void Assert() {
 		assert(Address::indexFieldSize_!=0);
-		assert(Address::wordFieldSize_!=0);
 		assert(Address::tagFieldSize_!=0);
 		assert(Address::tagMask_!=0);
 		assert(Address::indexMask_!=0);
-		assert(Address::wordMask_!=0);
 	}
 };
 uint32_t Address::byteFieldSize_ = 0;
@@ -255,6 +272,10 @@ private:
 	const uint32_t blockSize_;
 	const uint32_t numBlocks_;
 	const uint32_t numSets_;
+	unsigned long long rhits_;
+	unsigned long long rmisses_;
+	unsigned long long whits_;
+	unsigned long long wmisses_;
 	RAM & ram_;
 
 	std::vector<std::vector<DataBlock> > blocks_;
@@ -270,8 +291,10 @@ private:
 
 public:
 	Cache(const CacheConfig& config, RAM& ram) :
-		nWay_(config.nWay), cacheSize_(config.cacheSize), blockSize_(config.blockSize),
-		numBlocks_(config.cacheBlockCount), numSets_(config.numSets), ram_(ram) {
+		nWay_(config.nWay), cacheSize_(config.cacheSize),
+		blockSize_(config.blockSize), numBlocks_(config.cacheBlockCount),
+		numSets_(config.numSets), rhits_(0), rmisses_(0),
+		whits_(0), wmisses_(0), ram_(ram) {
 
 		srand (time(NULL));
 		this->blocks_.resize(this->numSets_, std::vector<DataBlock>(this->nWay_));
@@ -288,13 +311,17 @@ public:
 
 		// cache search
 		for (uint32_t i=0; i<this->nWay_; ++i) {
-			if (valids[i] && tags[i]==tag) { // cache hit
+//			std::cout<< (valids[i] && (tags[i]==tag)) << std::endl;
+			if (valids[i] && (tags[i]==tag)) { // cache hit
+				++this->rhits_;
 				return set[i].GetWord(address.GetWord());
 			}
 		}
+
 		// cache miss: fetch from RAM.
 		// Note: copy constructor is called.
 		// not a pointer to the one in RAM.
+		++this->rmisses_;
 		DataBlock block = ram_.GetBlockCopy(address);
 		this->RandomWrite(block, setIndex);
 		return block.GetWord(address.GetWord());
@@ -310,19 +337,38 @@ public:
 
 		// write through + write allocate:
 		// RAM needs to be updated no matter what
-		this->ram_.SetWord(address, val, wordIndex);
+		this->ram_.SetWord(address, wordIndex, val);
 
 		// cache search
 		for (uint32_t i=0; i<this->nWay_; ++i) {
 			if (valids[i] && tags[i]==tag) { // cache hit
 				set[i].SetWord(wordIndex, val);
+				++this->whits_;
 				return;
 			}
 		}
 
 		// cache miss, bring in the new block from ram
+		++this->wmisses_;
 		DataBlock newBlock = this->ram_.GetBlockCopy(address);
 		this->RandomWrite(newBlock, setIndex);
+	}
+
+	void PrintStats() const {
+		std::cout << "RESULTS" << std::string(25, '=') << std::endl;
+		std::cout << "Instruction Count: " <<
+			this->wmisses_ + this->whits_ + this->rmisses_ + this->rhits_
+				<< std::endl;
+		std::cout << "Read hits: " << this->rhits_ <<std::endl;
+		std::cout << "Read misses: " << this->rmisses_ <<std::endl;
+		std::cout << "Read miss rate: " <<
+			static_cast<double>(this->rmisses_) / (this->rhits_ + this->rmisses_)
+				<<std::endl;
+		std::cout << "Write hits: " << this->whits_ <<std::endl;
+		std::cout << "Write misses: " << this->wmisses_ <<std::endl;
+		std::cout << "Write miss rate: " <<
+			static_cast<double>(this->wmisses_) / (this->whits_ + this->wmisses_)
+				<<std::endl;
 	}
 };
 
@@ -331,9 +377,10 @@ class CPU {
 private:
 	std::unique_ptr<RAM> ram_;
 	std::unique_ptr<Cache> cache_;
+	const CacheConfig& config_;
 
 public:
-	CPU(const CacheConfig& config) {
+	CPU(const CacheConfig& config) : config_(config) {
 		DataBlock::StaticInit(config);
 		Address::StaticInit(config);
 		this->ram_ = std::unique_ptr<RAM>{ new RAM(config) };
@@ -356,5 +403,10 @@ public:
 
 	double MultDouble(double val1, double val2) const {
 		return val1*val2;
+	}
+
+	void PrintStats() const {
+		this->config_.PrintStats();
+		this->cache_->PrintStats();
 	}
 };

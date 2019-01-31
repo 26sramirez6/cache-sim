@@ -30,7 +30,7 @@ static void BuildConfiguration(CacheConfig& c, int argc, char ** argv) {
 			c.algo = std::string(argv[i+1]);
 		}
 	}
-	c.ComputeRAMStats();
+	c.ComputeStats();
 }
 
 static void daxpy (const CacheConfig& config) {
@@ -51,6 +51,18 @@ static void daxpy (const CacheConfig& config) {
 		cpu.StoreDouble(b[i], static_cast<double>(i)*2.);
 		cpu.StoreDouble(c[i], 0.);
 	}
+//	std::cout << "a: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << cpu.LoadDouble(a[i]) << ", ";
+//	}
+//	putchar('\n');
+
+//	std::cout << "b: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << cpu.LoadDouble(b[i]) << ", ";
+//	}
+//	putchar('\n');
+
 
 	double r0 = 3.;
 	double r1, r2, r3, r4;
@@ -62,29 +74,20 @@ static void daxpy (const CacheConfig& config) {
 		cpu.StoreDouble(c[i], r4);
 	}
 
-	for (int i=0; i<n; ++i) {
-		r1 = cpu.LoadDouble(a[i]);
-		r2 = cpu.MultDouble(r0, r1);
-		r3 = cpu.LoadDouble(b[i]);
-		r4 = cpu.AddDouble(r2, r3);
-		cpu.StoreDouble(c[i], r4);
-	}
+//	std::cout << "c: ";
+//	for (int i=0; i<n; ++i) {
+//		std::cout << cpu.LoadDouble(c[i]) << " ,";
+//	}
+//	putchar('\n');
 
-	for (int i=0; i<n; ++i) {
-		std::cout << cpu.LoadDouble(c[i]) << std::endl;
-	}
+	cpu.PrintStats();
 }
 
 int main (int argc, char ** argv) {
+
 	CacheConfig c;
 	BuildConfiguration(c, argc, argv);
 	daxpy(c);
-
-//	std::cout << std::bitset<ADDRLEN>(108504) << std::endl;
-//	std::cout << std::bitset<ADDRLEN>(a.GetCacheFullIndex()) << std::endl;
-//	std::cout << std::bitset<ADDRLEN>(a.GetCacheBlock()) << std::endl;
-//	std::cout << std::bitset<ADDRLEN>(a.GetWord()) << std::endl;
-//	std::cout << "cache-sim terminating\n";
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }
