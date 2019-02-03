@@ -268,11 +268,9 @@ public:
 };
 
 struct CacheLine {
-	DataBlock dataBlock;
-	const uint32_t tag;
-//	CacheLine() : tag_(){
-//
-//	}
+	DataBlock& dataBlock_;
+	const uint32_t tag_;
+	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(dataBlock), tag_(tag) {}
 };
 
 class Cache {
@@ -335,7 +333,7 @@ public:
 			list.push_front(*(hit->second));
 			//list.splice( list.begin(), list, hit->second );
 			assert(list.size()<=this->nWay_);
-			return hit->second->dataBlock.GetWord(address.GetWord());
+			return hit->second->dataBlock_.GetWord(address.GetWord());
 		}
 
 		// cache search
@@ -356,10 +354,10 @@ public:
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
 			list.pop_back();
-			map.erase(evicted.tag);
+			map.erase(evicted.tag_);
 		}
 		DataBlock block = this->ram_.GetBlockCopy(address);
-		list.push_front(CacheLine{block, address.GetTag()});
+		list.push_front(CacheLine(block, address.GetTag()));
 		// update the map with new block
 		map.insert({tag, list.begin()});
 		assert(list.size()<=this->nWay_);
@@ -392,7 +390,7 @@ public:
 		if (hit!=map.end()) { // cache hit
 			// move the hit to the front of the list
 			++this->whits_;
-			hit->second->dataBlock.SetWord(wordIndex, val);
+			hit->second->dataBlock_.SetWord(wordIndex, val);
 			// move the hit to the front of the list
 			list.erase(hit->second);
 			list.push_front(*(hit->second));
@@ -406,10 +404,10 @@ public:
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
 			list.pop_back();
-			map.erase(evicted.tag);
+			map.erase(evicted.tag_);
 		}
 		DataBlock newBlock = this->ram_.GetBlockCopy(address);
-		list.push_front(CacheLine{newBlock, address.GetTag()});
+		list.push_front(CacheLine(newBlock, address.GetTag()));
 		// update the map with new block
 		map.insert({tag, list.begin()});
 		assert(list.size()<=this->nWay_);
