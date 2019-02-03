@@ -127,6 +127,7 @@ public:
 	Address (const Address&& other) : address_(std::move(other.address_)){ }
 
 	Address& operator=(const Address& other) = default;
+
 	Address& operator=(Address&& other) = default;
 
 	void PrintAddress() const {
@@ -265,8 +266,9 @@ public:
 	}
 };
 
+
 class Cache {
-private:
+protected:
 	const uint32_t nWay_;
 	const uint32_t cacheSize_;
 	const uint32_t blockSize_;
@@ -276,20 +278,16 @@ private:
 	unsigned long long rmisses_;
 	unsigned long long whits_;
 	unsigned long long wmisses_;
+
 	RAM & ram_;
 
+//	Policy policy_;
 	std::vector<std::vector<DataBlock> > blocks_;
 	std::vector<std::vector<bool> > valid_;
 	std::vector<std::vector<uint32_t> > tags_;
 
-	void RandomWrite(const DataBlock& block, const uint32_t setIndex) {
-		// randomly evict a block by overwrite
-		int evict = rand()%this->nWay_;
-		this->blocks_[setIndex][evict] = block;
-		this->valid_[setIndex][evict] = true;
-	}
+	virtual void Write(const DataBlock& block, const uint32_t setIndex) = 0;
 
-public:
 	Cache(const CacheConfig& config, RAM& ram) :
 		nWay_(config.nWay), cacheSize_(config.cacheSize),
 		blockSize_(config.blockSize), numBlocks_(config.cacheBlockCount),
@@ -301,6 +299,12 @@ public:
 		this->valid_.resize(this->numSets_, std::vector<bool>(this->nWay_, false));
 		this->tags_.resize(this->numSets_, std::vector<uint32_t>(this->nWay_));
 	}
+
+public:
+	virtual ~Cache() {};
+
+	// factory pattern
+	static std::unique_ptr<Cache> Create(const CacheConfig& config, RAM& ram);
 
 	double GetDouble(const Address& address) {
 		uint32_t setIndex = address.GetSet();
@@ -323,7 +327,7 @@ public:
 		// not a pointer to the one in RAM.
 		++this->rmisses_;
 		DataBlock block = ram_.GetBlockCopy(address);
-		this->RandomWrite(block, setIndex);
+		this->Write(block, setIndex);
 		return block.GetWord(address.GetWord());
 	}
 
@@ -351,7 +355,8 @@ public:
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
 		DataBlock newBlock = this->ram_.GetBlockCopy(address);
-		this->RandomWrite(newBlock, setIndex);
+		this->Write(newBlock, setIndex);
+//		this->RandomWrite(newBlock, setIndex);
 	}
 
 	void PrintStats() const {
@@ -373,6 +378,48 @@ public:
 };
 
 
+class LRUCache : public Cache {
+public:
+	LRUCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
+private:
+	void Write(const DataBlock& block, const uint32_t setIndex) {
+
+	}
+};
+
+class FIFOCache : public Cache {
+public:
+	FIFOCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
+private:
+	void Write(const DataBlock& block, const uint32_t setIndex) {
+
+	}
+};
+
+class RandomCache : public Cache {
+public:
+	RandomCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
+private:
+	void Write(const DataBlock& block, const uint32_t setIndex) {
+		// randomly evict a block by overwrite
+		int evict = rand()%this->nWay_;
+		this->blocks_[setIndex][evict] = block;
+		this->valid_[setIndex][evict] = true;
+	}
+};
+
+std::unique_ptr<Cache> Cache::Create(const CacheConfig& config, RAM& ram) {
+	if (!config.policy.compare("LRU")) {
+		return std::unique_ptr<Cache> { new LRUCache(config, ram) };
+	} else if (!config.policy.compare("FIFO")) {
+		return std::unique_ptr<Cache> { new FIFOCache(config, ram) };
+	} else if (!config.policy.compare("random")) {
+		return std::unique_ptr<Cache> { new RandomCache(config, ram) };
+	}
+	throw std::invalid_argument("bad policy");
+}
+
+
 class CPU {
 private:
 	std::unique_ptr<RAM> ram_;
@@ -384,9 +431,7 @@ public:
 		DataBlock::StaticInit(config);
 		Address::StaticInit(config);
 		this->ram_ = std::unique_ptr<RAM>{ new RAM(config) };
-		this->cache_ = std::unique_ptr<Cache>{
-			new Cache(config, *this->ram_)
-		};
+		this->cache_ = Cache::Create(config, *this->ram_);
 	}
 
 	double LoadDouble(const Address& address) {
