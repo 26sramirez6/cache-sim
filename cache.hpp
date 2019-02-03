@@ -267,6 +267,13 @@ public:
 	}
 };
 
+struct CacheLine {
+	DataBlock dataBlock;
+	const uint32_t tag;
+//	CacheLine() : tag_(){
+//
+//	}
+};
 
 class Cache {
 protected:
@@ -283,23 +290,26 @@ protected:
 	RAM & ram_;
 
 //	Policy policy_;
-	std::vector< std::list<DataBlock> > blocks_;
-	std::vector< std::vector<bool> > valid_;
-	std::vector< std::vector<uint32_t> > tags_;
-	std::vector< std::unordered_map<uint32_t, std::list::iterator> > maps_;
+	std::vector< std::list<CacheLine> > blocks_;
+//	std::vector< std::vector<bool> > valid_;
+//	std::vector< std::vector<uint32_t> > tags_;
+	std::vector< std::unordered_map<uint32_t, std::list<CacheLine>::iterator> > maps_;
 	virtual void Write(const DataBlock& block, const uint32_t setIndex) = 0;
 
 	Cache(const CacheConfig& config, RAM& ram) :
 		nWay_(config.nWay), cacheSize_(config.cacheSize),
 		blockSize_(config.blockSize), numBlocks_(config.cacheBlockCount),
 		numSets_(config.numSets), rhits_(0), rmisses_(0),
-		whits_(0), wmisses_(0), ram_(ram) {
+		whits_(0), wmisses_(0), ram_(ram), blocks_(config.numSets), maps_(config.numSets) {
 
 		srand (time(NULL));
-		this->blocks_.resize(this->numSets_, std::list<DataBlock>(this->nWay_));
-		this->valid_.resize(this->numSets_, std::vector<bool>(this->nWay_, false));
-		this->tags_.resize(this->numSets_, std::vector<uint32_t>(this->nWay_));
-		this->maps_.resize(this->numSets_);
+//		this->blocks_.resize(this->numSets_);
+//		for (auto it=this->blocks_.begin(); it!=this->blocks_.end(); ++it) {
+//			(*
+//		}
+//		this->valid_.resize(this->numSets_, std::vector<bool>(this->nWay_, false));
+//		this->tags_.resize(this->numSets_, std::vector<uint32_t>(this->nWay_));
+//		this->maps_.resize(this->numSets_);
 	}
 
 public:
@@ -311,34 +321,48 @@ public:
 	double GetDouble(const Address& address) {
 		uint32_t setIndex = address.GetSet();
 		uint32_t tag = address.GetTag();
-		std::list<DataBlock>& list = this->blocks_[setIndex];
-		std::unordered_map<uint32_t, std::list::iterator>& map = this->blocks_[setIndex];
-		std::vector<bool>& valids = this->valid_[setIndex];
-		std::vector<uint32_t>& tags = this->tags_[setIndex];
+		std::list<CacheLine>& list = this->blocks_[setIndex];
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
+//		std::vector<bool>& valids = this->valid_[setIndex];
+//		std::vector<uint32_t>& tags = this->tags_[setIndex];
 
 		//O(1) search
-		std::unordered_map<uint32_t, std::list::iterator>::const_iterator hit = map.find(tag);
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
 		if (hit!=map.end()) { // cache hit
 			++this->rhits_;
-//			std::cout << hit->second
+			// move the hit to the front of the list
+			list.erase(hit->second);
+			list.push_front(*(hit->second));
+			//list.splice( list.begin(), list, hit->second );
+			assert(list.size()<=this->nWay_);
+			return hit->second->dataBlock.GetWord(address.GetWord());
 		}
-
 
 		// cache search
-		for (uint32_t i=0; i<this->nWay_; ++i) {
-//			std::cout<< (valids[i] && (tags[i]==tag)) << std::endl;
-			if (valids[i] && (tags[i]==tag)) { // cache hit
-				++this->rhits_;
-				return list[i].GetWord(address.GetWord());
-			}
-		}
+//		for (uint32_t i=0; i<this->nWay_; ++i) {
+////			std::cout<< (valids[i] && (tags[i]==tag)) << std::endl;
+//			if (valids[i] && (tags[i]==tag)) { // cache hit
+//				++this->rhits_;
+//				return list[i].GetWord(address.GetWord());
+//			}
+//		}
 
 		// cache miss: fetch from RAM.
 		// Note: copy constructor is called.
 		// not a pointer to the one in RAM.
 		++this->rmisses_;
-		DataBlock block = ram_.GetBlockCopy(address);
-		this->Write(block, setIndex);
+
+		if (list.size() == this->nWay_) {
+			// need to evict back of list (LRU)
+			CacheLine& evicted = list.back();
+			list.pop_back();
+			map.erase(evicted.tag);
+		}
+		DataBlock block = this->ram_.GetBlockCopy(address);
+		list.push_front(CacheLine{block, address.GetTag()});
+		// update the map with new block
+		map.insert({tag, list.begin()});
+		assert(list.size()<=this->nWay_);
 		return block.GetWord(address.GetWord());
 	}
 
@@ -346,27 +370,52 @@ public:
 		uint32_t setIndex = address.GetSet();
 		uint32_t tag = address.GetTag();
 		uint32_t wordIndex = address.GetWord();
-		std::vector<DataBlock>& set = this->blocks_[setIndex];
-		std::vector<bool>& valids = this->valid_[setIndex];
-		std::vector<uint32_t>& tags = this->tags_[setIndex];
+		std::list<CacheLine>& list = this->blocks_[setIndex];
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
+//		std::vector<bool>& valids = this->valid_[setIndex];
+//		std::vector<uint32_t>& tags = this->tags_[setIndex];
 
 		// write through + write allocate:
 		// RAM needs to be updated no matter what
 		this->ram_.SetWord(address, wordIndex, val);
 
 		// cache search
-		for (uint32_t i=0; i<this->nWay_; ++i) {
-			if (valids[i] && tags[i]==tag) { // cache hit
-				set[i].SetWord(wordIndex, val);
-				++this->whits_;
-				return;
-			}
+//		for (uint32_t i=0; i<this->nWay_; ++i) {
+//			if (valids[i] && tags[i]==tag) { // cache hit
+//				set[i].SetWord(wordIndex, val);
+//				++this->whits_;
+//				return;
+//			}
+//		}
+
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
+		if (hit!=map.end()) { // cache hit
+			// move the hit to the front of the list
+			++this->whits_;
+			hit->second->dataBlock.SetWord(wordIndex, val);
+			// move the hit to the front of the list
+			list.erase(hit->second);
+			list.push_front(*(hit->second));
+			assert(list.size()<=this->nWay_);
+			return;
 		}
 
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
+		if (list.size() == this->nWay_) {
+			// need to evict back of list (LRU)
+			CacheLine& evicted = list.back();
+			list.pop_back();
+			map.erase(evicted.tag);
+		}
 		DataBlock newBlock = this->ram_.GetBlockCopy(address);
-		this->Write(newBlock, setIndex);
+		list.push_front(CacheLine{newBlock, address.GetTag()});
+		// update the map with new block
+		map.insert({tag, list.begin()});
+		assert(list.size()<=this->nWay_);
+		return;
+
+//		this->Write(newBlock, setIndex);
 //		this->RandomWrite(newBlock, setIndex);
 	}
 
@@ -412,9 +461,9 @@ public:
 private:
 	void Write(const DataBlock& block, const uint32_t setIndex) {
 		// randomly evict a block by overwrite
-		int evict = rand()%this->nWay_;
-		this->blocks_[setIndex][evict] = block;
-		this->valid_[setIndex][evict] = true;
+//		int evict = rand()%this->nWay_;
+//		this->blocks_[setIndex][evict] = block;
+//		this->valid_[setIndex][evict] = true;
 	}
 };
 
