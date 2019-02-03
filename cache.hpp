@@ -2,7 +2,8 @@
 #include <vector>
 #include <iostream>
 #include <bitset>
-
+#include <list>
+#include <unordered_map>
 //#define NDEBUG
 #include <assert.h>
 #include <time.h>
@@ -282,10 +283,10 @@ protected:
 	RAM & ram_;
 
 //	Policy policy_;
-	std::vector<std::vector<DataBlock> > blocks_;
-	std::vector<std::vector<bool> > valid_;
-	std::vector<std::vector<uint32_t> > tags_;
-
+	std::vector< std::list<DataBlock> > blocks_;
+	std::vector< std::vector<bool> > valid_;
+	std::vector< std::vector<uint32_t> > tags_;
+	std::vector< std::unordered_map<uint32_t, std::list::iterator> > maps_;
 	virtual void Write(const DataBlock& block, const uint32_t setIndex) = 0;
 
 	Cache(const CacheConfig& config, RAM& ram) :
@@ -295,9 +296,10 @@ protected:
 		whits_(0), wmisses_(0), ram_(ram) {
 
 		srand (time(NULL));
-		this->blocks_.resize(this->numSets_, std::vector<DataBlock>(this->nWay_));
+		this->blocks_.resize(this->numSets_, std::list<DataBlock>(this->nWay_));
 		this->valid_.resize(this->numSets_, std::vector<bool>(this->nWay_, false));
 		this->tags_.resize(this->numSets_, std::vector<uint32_t>(this->nWay_));
+		this->maps_.resize(this->numSets_);
 	}
 
 public:
@@ -309,16 +311,25 @@ public:
 	double GetDouble(const Address& address) {
 		uint32_t setIndex = address.GetSet();
 		uint32_t tag = address.GetTag();
-		std::vector<DataBlock>& set = this->blocks_[setIndex];
+		std::list<DataBlock>& list = this->blocks_[setIndex];
+		std::unordered_map<uint32_t, std::list::iterator>& map = this->blocks_[setIndex];
 		std::vector<bool>& valids = this->valid_[setIndex];
 		std::vector<uint32_t>& tags = this->tags_[setIndex];
+
+		//O(1) search
+		std::unordered_map<uint32_t, std::list::iterator>::const_iterator hit = map.find(tag);
+		if (hit!=map.end()) { // cache hit
+			++this->rhits_;
+//			std::cout << hit->second
+		}
+
 
 		// cache search
 		for (uint32_t i=0; i<this->nWay_; ++i) {
 //			std::cout<< (valids[i] && (tags[i]==tag)) << std::endl;
 			if (valids[i] && (tags[i]==tag)) { // cache hit
 				++this->rhits_;
-				return set[i].GetWord(address.GetWord());
+				return list[i].GetWord(address.GetWord());
 			}
 		}
 
@@ -376,7 +387,6 @@ public:
 				<<std::endl;
 	}
 };
-
 
 class LRUCache : public Cache {
 public:
