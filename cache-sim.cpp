@@ -46,8 +46,12 @@ static void daxpy (const CacheConfig& config) {
 	for (int i=0;i<n;++i) {
 		a.push_back(Address(i*sizeof(double)));
 		b.push_back(Address((n+i)*sizeof(double)));
-		c.push_back(Address((2*n+i)*sizeof(double)));
+		c.push_back(Address(((2*n)+i)*sizeof(double)));
+//		std::cout << "storing " << i << " in a" << std::endl;
 		cpu.StoreDouble(a[i], static_cast<double>(i));
+//		std::cout << "loaded " << cpu.LoadDouble(a[i]) << " from address "
+//				<< i << "in a" <<std::endl;
+//		std::cout << c[i].address_ << std::endl;
 		cpu.StoreDouble(b[i], static_cast<double>(i)*2.);
 		cpu.StoreDouble(c[i], 0.);
 	}
@@ -163,7 +167,6 @@ int main (int argc, char ** argv) {
 	CacheConfig c;
 	BuildConfiguration(c, argc, argv);
 	daxpy(c);
-
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }

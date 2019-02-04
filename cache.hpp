@@ -119,6 +119,7 @@ private:
 	static uint32_t ramBlockShift_;
 public:
 	const uint32_t address_;
+
 #ifndef NDEBUG
 	Address(uint32_t address) : address_(address) {	this->Assert();	}
 #else
@@ -166,9 +167,9 @@ public:
 		wordFieldSize_ = GetBitLength(config.wordsPerBlock) - 1;
 		setFieldSize_ = GetBitLength(config.numSets) - 1;
 		byteFieldSize_ = GetBitLength(config.wordSize) - 1;
-		ramBlockFieldSize_ = GetBitLength(config.ramBlockCount) - 1;
+		ramBlockFieldSize_ = GetBitLength(config.ramBlockCount);
 		cacheBlockFieldSize_ = indexFieldSize_ - setFieldSize_;
-		tagFieldSize_ = ADDRLEN - indexFieldSize_ - wordFieldSize_ - byteFieldSize_;
+		tagFieldSize_ = ADDRLEN - setFieldSize_ - wordFieldSize_ - byteFieldSize_;
 
 		byteMask_ = (1 << byteFieldSize_) - 1;
 		wordMask_ = ((1 << (wordFieldSize_ + byteFieldSize_)) - 1)&(~byteMask_);
@@ -181,11 +182,16 @@ public:
 
 		wordShift_ = byteFieldSize_;
 		setShift_ = wordFieldSize_ + byteFieldSize_;
-		cacheBlockShift_ = setShift_ + wordFieldSize_ + byteFieldSize_;
-		tagShift_ = setShift_ + wordFieldSize_ + byteFieldSize_ + cacheBlockShift_;
-		ramBlockShift_ = setShift_;
+		cacheBlockShift_ = byteFieldSize_ + wordFieldSize_ + setFieldSize_;
+		tagShift_ = setFieldSize_ + wordFieldSize_ + byteFieldSize_;
+		ramBlockShift_ = wordFieldSize_ + byteFieldSize_;;
 
 #ifdef CACHE_DEBUG
+		std::cout << "word shift: " << wordShift_ << std::endl;
+		std::cout << "set shift: " << setShift_ << std::endl;
+		std::cout << "cacheblock shift: " << cacheBlockShift_ << std::endl;
+		std::cout << "tag shift: " << tagShift_ << std::endl;
+		std::cout << "ramblock shift: " << ramBlockShift_ << std::endl;
 		std::cout << "byte mask:             " << std::bitset<ADDRLEN>(byteMask_) << std::endl;
 		std::cout << "word mask:             " << std::bitset<ADDRLEN>(wordMask_) << std::endl;
 		std::cout << "set mask:              " << std::bitset<ADDRLEN>(setMask_) << std::endl;
@@ -234,8 +240,12 @@ public:
 	std::vector<double> data_;
 	DataBlock() : data_(numWords_) { assert(this->size_!=0); }
 	~DataBlock() { }
-	DataBlock(DataBlock&& other) : data_(std::move(other.data_)) {}
-	DataBlock(const DataBlock &other) : data_(other.data_) { }
+	DataBlock(DataBlock&& other) : data_(std::move(other.data_)) {
+//		std::cout<<"Datablock move ctor called"<<std::endl;
+	}
+	DataBlock(const DataBlock &other) : data_(other.data_) {
+//		std::cout<<"Datablock copy ctor called"<<std::endl;
+	}
 	DataBlock& operator=(const DataBlock& other) = default;
 	DataBlock& operator=(DataBlock&& other) = default;
 
@@ -261,12 +271,13 @@ uint32_t DataBlock::numWords_ = 0;
 class RAM {
 private:
 	const uint32_t size_;
-	std::vector<DataBlock> blocks_;
+
 public:
+	std::vector<DataBlock> blocks_;
 	RAM(const CacheConfig& config) : size_(config.ramSize), blocks_(config.ramBlockCount) {}
 
 	DataBlock GetBlockCopy(const Address& address) const {
-		return blocks_[address.GetRamBlock()];
+		return DataBlock(blocks_[address.GetRamBlock()]);
 	}
 
 	void SetWord(const Address& address, const uint32_t offset, const double val) {
@@ -277,11 +288,11 @@ public:
 struct CacheLine {
 	DataBlock dataBlock_;
 	const uint32_t tag_;
-	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(std::move(dataBlock)), tag_(tag) {	}
+	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(dataBlock), tag_(tag) {	}
 	CacheLine(const CacheLine& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {
 //		std::cout << "CacheLine copy ctr called" << std::endl;
 	}
-	CacheLine(CacheLine&& other) : dataBlock_(std::move(other.dataBlock_)), tag_(other.tag_) {
+	CacheLine(CacheLine&& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {
 //		std::cout << "CacheLine move ctr called" << std::endl;
 	}
 	CacheLine& operator=(const CacheLine& other) = default;
@@ -337,9 +348,18 @@ public:
 			++this->rhits_;
 			// move the hit to the front of the list
 			CacheLine cl(*(hit->second));
+//			std::cout << "iterator word: " <<hit->second->dataBlock_.GetWord(address.GetWord())<<std::endl;
 			list.erase(hit->second);
 			list.push_front(cl);
+			// update the stored iterator
+			map[tag] = list.begin();
 			//list.splice( list.begin(), list, hit->second );
+//			std::cout << "ram word: " << this->ram_.blocks_[address.GetRamBlock()].GetWord(address.GetWord()) << std::endl;
+//			std::cout << "cache word: " << cl.dataBlock_.GetWord(address.GetWord()) << std::endl;
+//			for (auto& t : map)
+//			    std::cout << t.first << ", " << t.second->dataBlock_.GetWord(address.GetWord()) << "\n";
+
+			assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(address.GetWord())==cl.dataBlock_.GetWord(address.GetWord()));
 			return cl.dataBlock_.GetWord(address.GetWord());
 		}
 
@@ -350,17 +370,20 @@ public:
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
 			list.pop_back();
-			map.erase(evicted.tag_);
+			int ret = map.erase(evicted.tag_);
+			assert(ret==1);
+			assert(map.count(evicted.tag_)==0);
 		}
 		// Note: copy constructor is called.
 		// a copied block from the one in RAM.
-		DataBlock newBlock = this->ram_.GetBlockCopy(address);
+		DataBlock newBlock(this->ram_.GetBlockCopy(address));
 		// Note: this cacheline holds a reference
 		// to this the copied block
 		CacheLine line(newBlock, address.GetTag());
+		assert(line.dataBlock_.GetWord(address.GetWord())==newBlock.GetWord(address.GetWord()));
 		list.push_front(line);
 		// update the map with new block
-		map.insert({tag, list.begin()});
+		map[tag] = list.begin();
 		return line.dataBlock_.GetWord(address.GetWord());
 	}
 
@@ -375,38 +398,47 @@ public:
 		// write through + write allocate:
 		// RAM needs to be updated no matter what
 		this->ram_.SetWord(address, wordIndex, val);
-
+		assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(wordIndex)==val);
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
 		if (hit!=map.end()) { // cache hit
 			// move the hit to the front of the list
 //			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
 			CacheLine cl(*(hit->second));
+//			std::cout << "Datablock size in CL : " << cl.dataBlock_.data_.size() << std::endl;
+//			std::cout << "word index in Datablock : " << wordIndex << std::endl;
 			cl.dataBlock_.SetWord(wordIndex, val);
-
+			assert(cl.dataBlock_.GetWord(address.GetWord())==val);
+//			std::cout << "successful word set. verifying list size: " << list.size() << std::endl;
 			// move the hit to the front of the list
-			list.erase(hit->second);
 
+			list.erase(hit->second);
+//			printf("successful erase\n");
 			list.push_front(cl);
-//			std::cout << "Moved to front" << std::endl;
-//			std::cout << "List size: " << list.size() << std::endl;
+			map[tag] = list.begin();
+//			std::cout << "Moved to cache line to front. List size :" << list.size() << std::endl;
 			return;
 		}
 //		std::cout << "Cache miss" << std::endl;
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
+//		std::cout << "Checking list size: " <<list.size()<< "vs. nway: "<<this->nWay_ <<std::endl;
 		if (list.size() == this->nWay_) {
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
-			//std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
+//			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
-			map.erase(evicted.tag_);
+			int ret = map.erase(evicted.tag_);
+			assert(ret==1);
+			assert(map.count(evicted.tag_)==0);
 		}
-		DataBlock newBlock = this->ram_.GetBlockCopy(address);
+		DataBlock newBlock(this->ram_.GetBlockCopy(address));
 		CacheLine line(newBlock, address.GetTag());
+		assert(newBlock.GetWord(address.GetWord())==val);
+		assert(line.dataBlock_.GetWord(address.GetWord())==val);
 		list.push_front(line);
 		// update the map with new block
-		map.insert({tag, list.begin()});
+		map[tag] = list.begin();
 		assert(list.size()<=this->nWay_);
 		return;
 	}
@@ -486,10 +518,23 @@ public:
 	}
 
 	double LoadDouble(const Address& address) {
+		std::cout << "reading address: " << address.address_ <<
+				" set: " << address.GetSet() <<
+				" block index: " << address.GetCacheBlock() <<
+				" tag: " << address.GetTag() <<
+				" word: " << address.GetWord() <<
+				" ram block: " << address.GetRamBlock() << std::endl;
 		return this->cache_->GetDouble(address);
 	}
 
 	void StoreDouble(Address& address, double value) {
+		std::cout << "storing " << value <<
+			" in address: " << address.address_ <<
+			" set: " << address.GetSet() <<
+			" block index: " << address.GetCacheBlock() <<
+			" tag: " << address.GetTag() <<
+			" word: " << address.GetWord() <<
+			" ram block: " << address.GetRamBlock() << std::endl;
 		this->cache_->SetDouble(address, value);
 //		std::cout << "Successful store of address: " << address.address_ << " val: " << value << std::endl;
 	}
