@@ -25,13 +25,45 @@ static void BuildConfiguration(CacheConfig& c, int argc, char ** argv) {
 		} else if (!strcmp(argv[i], "-d")) {
 			c.matDims = atoi(argv[i+1]);
 		} else if (!strcmp(argv[i],"-r")) {
-			c.policy = std::string(argv[i+1]);
+			c.SetPolicy(argv[i+1]);
 		} else if (!strcmp(argv[i],"-a")) {
-			c.algo = std::string(argv[i+1]);
+			c.SetAlgo(argv[i+1]);
 		}
 	}
 	c.ComputeStats();
 }
+
+
+static void mxm (const CacheConfig& config) {
+	CPU cpu(config);
+	std::vector<Address> a;
+	std::vector<Address> b;
+	std::vector<Address> c;
+	int n = config.totalWords/3;
+	a.reserve(n);
+	b.reserve(n);
+	c.reserve(n);
+	for (int i=0;i<n;++i) {
+		a.push_back(Address(i*sizeof(double)));
+		b.push_back(Address((n+i)*sizeof(double)));
+		c.push_back(Address(((2*n)+i)*sizeof(double)));
+		cpu.StoreDouble(a[i], static_cast<double>(i));
+		cpu.StoreDouble(b[i], static_cast<double>(i)*2.);
+		cpu.StoreDouble(c[i], 0.);
+	}
+
+//	for(i = 0; i < rowFirst; ++i)
+//	{
+//		for(j = 0; j < columnSecond; ++j)
+//		{
+//			for(k=0; k<columnFirst; ++k)
+//			{
+//				mult[i][j] += firstMatrix[i][k] * secondMatrix[k][j];
+//			}
+//		}
+//	}
+}
+
 
 static void daxpy (const CacheConfig& config) {
 	CPU cpu(config);
@@ -47,25 +79,21 @@ static void daxpy (const CacheConfig& config) {
 		a.push_back(Address(i*sizeof(double)));
 		b.push_back(Address((n+i)*sizeof(double)));
 		c.push_back(Address(((2*n)+i)*sizeof(double)));
-//		std::cout << "storing " << i << " in a" << std::endl;
 		cpu.StoreDouble(a[i], static_cast<double>(i));
-//		std::cout << "loaded " << cpu.LoadDouble(a[i]) << " from address "
-//				<< i << "in a" <<std::endl;
-//		std::cout << c[i].address_ << std::endl;
 		cpu.StoreDouble(b[i], static_cast<double>(i)*2.);
 		cpu.StoreDouble(c[i], 0.);
 	}
-	std::cout << "a: ";
-	for (int i=0;i<n;++i) {
-		std::cout << cpu.LoadDouble(a[i]) << ", ";
-	}
-	putchar('\n');
-
-	std::cout << "b: ";
-	for (int i=0;i<n;++i) {
-		std::cout << cpu.LoadDouble(b[i]) << ", ";
-	}
-	putchar('\n');
+//	std::cout << "a: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << cpu.LoadDouble(a[i]) << ", ";
+//	}
+//	putchar('\n');
+//
+//	std::cout << "b: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << cpu.LoadDouble(b[i]) << ", ";
+//	}
+//	putchar('\n');
 
 	double r0 = 3.;
 	double r1, r2, r3, r4;
@@ -77,13 +105,13 @@ static void daxpy (const CacheConfig& config) {
 		cpu.StoreDouble(c[i], r4);
 	}
 
-	std::cout << "c: ";
+//	std::cout << "c: ";
 	for (int i=0; i<n; ++i) {
-		std::cout << cpu.LoadDouble(c[i]) << " ,";
+//		std::cout << cpu.LoadDouble(c[i]) << " ,";
+		assert(cpu.LoadDouble(c[i])==(cpu.LoadDouble(a[i])*r0 + cpu.LoadDouble(b[i])));
 	}
 	putchar('\n');
-
-	cpu.PrintStats();
+	if (config.logging) cpu.PrintStats();
 }
 
 //struct B {
@@ -154,19 +182,13 @@ static void daxpy (const CacheConfig& config) {
 //}
 
 int main (int argc, char ** argv) {
-//	std::vector<C> test;
-//	func(test);
-//	read(test);
-//	A a;
-//	B b(a.TestCopy(10));
-//	C c(b);
-//	std::cout << "address of b: " << &b << std::endl;
-//	std::cout << "address of c block: " << &(c.block) << std::endl;
-//	if (&b==&(c.block)) std::cout << "b equal to c" << std::endl;
-
 	CacheConfig c;
 	BuildConfiguration(c, argc, argv);
-	daxpy(c);
+	if (c.algo==c.daxpy) {
+		daxpy(c);
+	} else if (c.algo==c.mxm) {
+		mxm(c);
+	}
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }

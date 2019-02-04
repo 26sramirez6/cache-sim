@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define CACHE_DEBUG
+//#define CACHE_DEBUG
 uint32_t constexpr ADDRLEN = 32;
 uint32_t constexpr MATS = 3;
 
@@ -32,8 +32,10 @@ struct CacheConfig {
 	uint32_t cacheBlockCount;
 	uint32_t numSets;
 	bool logging;
-	std::string policy;
-	std::string algo;
+	enum Policy { LRU, FIFO, Random };
+	enum Algo { daxpy, mxm, mxm_blocking };
+	Policy policy;
+	Algo algo;
 	uint32_t wordSize;
 	uint32_t ramSize;
 	uint32_t ramBlockCount;
@@ -43,9 +45,29 @@ struct CacheConfig {
 	CacheConfig(): nWay(2), cacheSize(65536),
 		blockSize(64), matDims(480),
 		blockFactor(32), cacheBlockCount(0), numSets(0),
-		logging(false), policy("LRU"), algo("mxm_block"),
+		logging(false), policy(LRU), algo(mxm_blocking),
 		wordSize(sizeof(double)), ramSize(0),
 		ramBlockCount(0), totalWords(0), wordsPerBlock(0) {	};
+
+	void SetPolicy (char * policy) {
+		if (!strcmp(policy, "LRU")) {
+			this->policy = LRU;
+		} else if (!strcmp(policy, "FIFO")) {
+			this->policy = FIFO;
+		} else if (!strcmp(policy, "random")) {
+			this->policy = Random;
+		}
+	}
+
+	void SetAlgo (char * algo) {
+		if (!strcmp(algo, "daxpy")) {
+			this->algo = daxpy;
+		} else if (!strcmp(algo, "mxm")) {
+			this->algo = mxm;
+		} else if (!strcmp(algo, "mxm_blocking")) {
+			this->algo = mxm_blocking;
+		}
+	}
 
 	void ComputeStats() {
 		// can be re-called as needed
@@ -60,7 +82,7 @@ struct CacheConfig {
 			exit(1);
 		}
 
-		if (this->algo=="mxm_block" || this->algo=="mxm") {
+		if (this->algo==mxm_blocking || this->algo==mxm) {
 			this->ramSize += this->matDims*this->matDims*this->wordSize*MATS;
 		} else {
 			this->ramSize += this->matDims*this->wordSize*MATS;
@@ -79,8 +101,35 @@ struct CacheConfig {
 		std::cout << "Total Blocks in RAM: " << this->ramBlockCount << std::endl;
 		std::cout << "Associativity: " << this->nWay << std::endl;
 		std::cout << "Number of Sets: " << this->numSets << std::endl;
-		std::cout << "Replacement Policy: " << this->policy << std::endl;
-		std::cout << "Algorithm: " << this->algo << std::endl;
+
+		std::string p;
+		switch (this->policy) {
+		case LRU:
+			p = "LRU";
+			break;
+		case FIFO:
+			p = "FIFO";
+			break;
+		case Random:
+			p = "Random";
+			break;
+		}
+		std::cout << "Replacement Policy: " << p << std::endl;
+
+		std::string a;
+		switch (this->algo) {
+		case daxpy:
+			a = "daxpy";
+			break;
+		case mxm:
+			a = "mxm";
+			break;
+		case mxm_blocking:
+			a = "mxm_blocking";
+			break;
+		}
+
+		std::cout << "Algorithm: " << a << std::endl;
 		std::cout << "MXM Blocking Factor: " << this->blockFactor << std::endl;
 		std::cout << "Matrix or Vector dimension: " << this->matDims << std::endl;
 		std::cout << "Total Words: " << this->totalWords << std::endl;
@@ -319,7 +368,7 @@ protected:
 //	std::vector< std::vector<bool> > valid_;
 //	std::vector< std::vector<uint32_t> > tags_;
 	std::vector< std::unordered_map<uint32_t, std::list<CacheLine>::iterator> > maps_;
-	virtual void Write(const DataBlock& block, const uint32_t setIndex) = 0;
+//	virtual void Write(const DataBlock& block, const uint32_t setIndex) = 0;
 
 	Cache(const CacheConfig& config, RAM& ram) :
 		nWay_(config.nWay), cacheSize_(config.cacheSize),
@@ -332,9 +381,32 @@ protected:
 
 public:
 	virtual ~Cache() {};
-
+	virtual double GetDouble(const Address& address) = 0;
+	virtual void SetDouble(const Address& address, const double val) = 0;
 	// factory pattern
 	static std::unique_ptr<Cache> Create(const CacheConfig& config, RAM& ram);
+
+	void PrintStats() const {
+		std::cout << "RESULTS" << std::string(25, '=') << std::endl;
+		std::cout << "Instruction Count: " <<
+			this->wmisses_ + this->whits_ + this->rmisses_ + this->rhits_
+				<< std::endl;
+		std::cout << "Read hits: " << this->rhits_ <<std::endl;
+		std::cout << "Read misses: " << this->rmisses_ <<std::endl;
+		std::cout << "Read miss rate: " <<
+			static_cast<double>(this->rmisses_) / (this->rhits_ + this->rmisses_)
+				<<std::endl;
+		std::cout << "Write hits: " << this->whits_ <<std::endl;
+		std::cout << "Write misses: " << this->wmisses_ <<std::endl;
+		std::cout << "Write miss rate: " <<
+			static_cast<double>(this->wmisses_) / (this->whits_ + this->wmisses_)
+				<<std::endl;
+	}
+};
+
+class LRUCache : public Cache {
+public:
+	LRUCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
 
 	double GetDouble(const Address& address) {
 		uint32_t setIndex = address.GetSet();
@@ -442,32 +514,6 @@ public:
 		assert(list.size()<=this->nWay_);
 		return;
 	}
-
-	void PrintStats() const {
-		std::cout << "RESULTS" << std::string(25, '=') << std::endl;
-		std::cout << "Instruction Count: " <<
-			this->wmisses_ + this->whits_ + this->rmisses_ + this->rhits_
-				<< std::endl;
-		std::cout << "Read hits: " << this->rhits_ <<std::endl;
-		std::cout << "Read misses: " << this->rmisses_ <<std::endl;
-		std::cout << "Read miss rate: " <<
-			static_cast<double>(this->rmisses_) / (this->rhits_ + this->rmisses_)
-				<<std::endl;
-		std::cout << "Write hits: " << this->whits_ <<std::endl;
-		std::cout << "Write misses: " << this->wmisses_ <<std::endl;
-		std::cout << "Write miss rate: " <<
-			static_cast<double>(this->wmisses_) / (this->whits_ + this->wmisses_)
-				<<std::endl;
-	}
-};
-
-class LRUCache : public Cache {
-public:
-	LRUCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
-private:
-	void Write(const DataBlock& block, const uint32_t setIndex) {
-
-	}
 };
 
 class FIFOCache : public Cache {
@@ -476,6 +522,92 @@ public:
 private:
 	void Write(const DataBlock& block, const uint32_t setIndex) {
 
+	}
+
+	void SetDouble(const Address& address, const double val) {
+		uint32_t setIndex = address.GetSet();
+		uint32_t tag = address.GetTag();
+		uint32_t wordIndex = address.GetWord();
+		std::list<CacheLine>& list = this->blocks_[setIndex];
+		assert(list.size() <= this->nWay_);
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
+
+		// write through + write allocate:
+		// RAM needs to be updated no matter what
+		this->ram_.SetWord(address, wordIndex, val);
+		assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(wordIndex)==val);
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
+		// **** CACHE HIT ****
+		if (hit!=map.end()) {
+			// dont bother reordering the queue since its FIFO
+//			std::cout << "Cache hit" << std::endl;
+			++this->whits_;
+			hit->second->dataBlock_.SetWord(wordIndex, val);
+			assert(hit->second->dataBlock_.GetWord(wordIndex)==val);
+			return;
+		}
+//		std::cout << "Cache miss" << std::endl;
+		// **** CACHE MISS ****
+		// cache miss, bring in the new block from ram
+		++this->wmisses_;
+//		std::cout << "Checking list size: " <<list.size()<< "vs. nway: "<<this->nWay_ <<std::endl;
+		if (list.size() == this->nWay_) {
+			// need to evict back of list (FIFO)
+			CacheLine& evicted = list.back();
+//			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
+			list.pop_back();
+			int ret = map.erase(evicted.tag_);
+			assert(ret==1);
+			assert(map.count(evicted.tag_)==0);
+		}
+		DataBlock newBlock(this->ram_.GetBlockCopy(address));
+		CacheLine line(newBlock, address.GetTag());
+		assert(newBlock.GetWord(address.GetWord())==val);
+		assert(line.dataBlock_.GetWord(address.GetWord())==val);
+		list.push_front(line);
+		// update the map with new block
+		map[tag] = list.begin();
+		assert(list.size()<=this->nWay_);
+		return;
+	}
+
+	double GetDouble(const Address& address) {
+		uint32_t setIndex = address.GetSet();
+		uint32_t tag = address.GetTag();
+		std::list<CacheLine>& list = this->blocks_[setIndex];
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
+
+		//O(1) search
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
+		// *** CACHE LOAD HIT ***
+		if (hit!=map.end()) { // cache hit
+			++this->rhits_;
+			assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(address.GetWord())==
+					hit->second->dataBlock_.GetWord(address.GetWord()));
+			return hit->second->dataBlock_.GetWord(address.GetWord());
+		}
+
+		// *** CACHE LOAD MISS ***
+		// cache miss: fetch from RAM.
+		++this->rmisses_;
+
+		if (list.size() == this->nWay_) {
+			// need to evict back of list (FIFO)
+			CacheLine& evicted = list.back();
+			list.pop_back();
+			int ret = map.erase(evicted.tag_);
+			assert(ret==1);
+			assert(map.count(evicted.tag_)==0);
+		}
+		// Note: copy constructor is called.
+		// a copied block from the one in RAM.
+		DataBlock newBlock(this->ram_.GetBlockCopy(address));
+		CacheLine line(newBlock, address.GetTag());
+		assert(line.dataBlock_.GetWord(address.GetWord())==newBlock.GetWord(address.GetWord()));
+		list.push_front(line);
+		// update the map with new block
+		map[tag] = list.begin();
+		return line.dataBlock_.GetWord(address.GetWord());
 	}
 };
 
@@ -489,14 +621,103 @@ private:
 //		this->blocks_[setIndex][evict] = block;
 //		this->valid_[setIndex][evict] = true;
 	}
+
+	void SetDouble(const Address& address, const double val) {
+		uint32_t setIndex = address.GetSet();
+		uint32_t tag = address.GetTag();
+		uint32_t wordIndex = address.GetWord();
+		std::list<CacheLine>& list = this->blocks_[setIndex];
+		assert(list.size() <= this->nWay_);
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
+
+		// write through + write allocate:
+		// RAM needs to be updated no matter what
+		this->ram_.SetWord(address, wordIndex, val);
+		assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(wordIndex)==val);
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
+		// **** CACHE HIT ****
+		if (hit!=map.end()) {
+			// dont bother reordering the queue since its FIFO
+//			std::cout << "Cache hit" << std::endl;
+			++this->whits_;
+			hit->second->dataBlock_.SetWord(wordIndex, val);
+			assert(hit->second->dataBlock_.GetWord(wordIndex)==val);
+			return;
+		}
+//		std::cout << "Cache miss" << std::endl;
+		// **** CACHE MISS ****
+		// cache miss, bring in the new block from ram
+		++this->wmisses_;
+//		std::cout << "Checking list size: " <<list.size()<< "vs. nway: "<<this->nWay_ <<std::endl;
+		if (list.size() == this->nWay_) {
+			// evict block at random
+			std::list<CacheLine>::iterator it = list.begin();
+			for (uint32_t i=0; i<rand()%this->nWay_; ++i) ++it;
+			CacheLine& evicted = *it;
+			list.erase(it);
+			int ret = map.erase(evicted.tag_);
+			assert(ret==1);
+			assert(map.count(evicted.tag_)==0);
+		}
+		DataBlock newBlock(this->ram_.GetBlockCopy(address));
+		CacheLine line(newBlock, address.GetTag());
+		assert(newBlock.GetWord(address.GetWord())==val);
+		assert(line.dataBlock_.GetWord(address.GetWord())==val);
+		list.push_front(line);
+		// update the map with new block
+		map[tag] = list.begin();
+		assert(list.size()<=this->nWay_);
+		return;
+	}
+
+	double GetDouble(const Address& address) {
+		uint32_t setIndex = address.GetSet();
+		uint32_t tag = address.GetTag();
+		std::list<CacheLine>& list = this->blocks_[setIndex];
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
+
+		//O(1) search
+		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
+		// *** CACHE LOAD HIT ***
+		if (hit!=map.end()) { // cache hit
+			++this->rhits_;
+			assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(address.GetWord())==
+					hit->second->dataBlock_.GetWord(address.GetWord()));
+			return hit->second->dataBlock_.GetWord(address.GetWord());
+		}
+
+		// *** CACHE LOAD MISS ***
+		// cache miss: fetch from RAM.
+		++this->rmisses_;
+
+		if (list.size() == this->nWay_) {
+			// evict block at random
+			std::list<CacheLine>::iterator it = list.begin();
+			for (uint32_t i=0; i<rand()%this->nWay_; ++i) ++it;
+			CacheLine& evicted = *it;
+			list.erase(it);
+			int ret = map.erase(evicted.tag_);
+			assert(ret==1);
+			assert(map.count(evicted.tag_)==0);
+		}
+		// Note: copy constructor is called.
+		// a copied block from the one in RAM.
+		DataBlock newBlock(this->ram_.GetBlockCopy(address));
+		CacheLine line(newBlock, address.GetTag());
+		assert(line.dataBlock_.GetWord(address.GetWord())==newBlock.GetWord(address.GetWord()));
+		list.push_front(line);
+		// update the map with new block
+		map[tag] = list.begin();
+		return line.dataBlock_.GetWord(address.GetWord());
+	}
 };
 
 std::unique_ptr<Cache> Cache::Create(const CacheConfig& config, RAM& ram) {
-	if (!config.policy.compare("LRU")) {
+	if (config.policy == config.LRU) {
 		return std::unique_ptr<Cache> { new LRUCache(config, ram) };
-	} else if (!config.policy.compare("FIFO")) {
+	} else if (config.policy == config.FIFO) {
 		return std::unique_ptr<Cache> { new FIFOCache(config, ram) };
-	} else if (!config.policy.compare("random")) {
+	} else if (config.policy == config.Random) {
 		return std::unique_ptr<Cache> { new RandomCache(config, ram) };
 	}
 	throw std::invalid_argument("bad policy");
@@ -518,16 +739,19 @@ public:
 	}
 
 	double LoadDouble(const Address& address) {
+#ifdef CACHE_DEBUG
 		std::cout << "reading address: " << address.address_ <<
 				" set: " << address.GetSet() <<
 				" block index: " << address.GetCacheBlock() <<
 				" tag: " << address.GetTag() <<
 				" word: " << address.GetWord() <<
 				" ram block: " << address.GetRamBlock() << std::endl;
+#endif
 		return this->cache_->GetDouble(address);
 	}
 
 	void StoreDouble(Address& address, double value) {
+#ifdef CACHE_DEBUG
 		std::cout << "storing " << value <<
 			" in address: " << address.address_ <<
 			" set: " << address.GetSet() <<
@@ -535,8 +759,8 @@ public:
 			" tag: " << address.GetTag() <<
 			" word: " << address.GetWord() <<
 			" ram block: " << address.GetRamBlock() << std::endl;
+#endif
 		this->cache_->SetDouble(address, value);
-//		std::cout << "Successful store of address: " << address.address_ << " val: " << value << std::endl;
 	}
 
 	double AddDouble(double val1, double val2) const {
