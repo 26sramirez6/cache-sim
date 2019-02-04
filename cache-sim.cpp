@@ -51,19 +51,63 @@ static void mxm (const CacheConfig& config) {
 		cpu.StoreDouble(b[i], static_cast<double>(i)*2.);
 		cpu.StoreDouble(c[i], 0.);
 	}
+//	std::cout << "a: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << a[i].address_ << " : " << cpu.LoadDouble(a[i]) << ", ";
+//	}
+//	putchar('\n');
+//
+//	std::cout << "b: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << b[i].address_ << " : " <<  cpu.LoadDouble(b[i]) << ", ";
+//	}
+//	putchar('\n');
+//
+//	std::cout << "c: ";
+//	for (int i=0;i<n;++i) {
+//		std::cout << c[i].address_ << " : " <<  cpu.LoadDouble(c[i]) << ", ";
+//	}
+//	putchar('\n');
 
-//	for(i = 0; i < rowFirst; ++i)
-//	{
-//		for(j = 0; j < columnSecond; ++j)
+
+	for (uint32_t i=0;i<config.matDims;++i) {
+		for (uint32_t j=0;j<config.matDims;++j) {
+			double r4 = 0;
+			for (uint32_t k=0;k<config.matDims;++k) {
+				double r1 = cpu.LoadDouble(a[(i*config.matDims)+k]);
+				double r2 = cpu.LoadDouble(b[j + (k*config.matDims)]);
+				r4 += cpu.MultDouble(r1, r2);
+			}
+			cpu.StoreDouble(c[i*config.matDims + j], r4);
+		}
+	}
+
+	for (uint32_t i=0;i<config.matDims;++i) {
+		for (uint32_t j=0;j<config.matDims;++j) {
+			double r4 = 0;
+			for (uint32_t k=0;k<config.matDims;++k) {
+				double r1 = cpu.LoadDouble(a[(i*config.matDims)+k]);
+				double r2 = cpu.LoadDouble(b[j + (k*config.matDims)]);
+				r4 += cpu.MultDouble(r1, r2);
+			}
+			assert(cpu.LoadDouble(c[i*config.matDims + j])==r4);
+		}
+	}
+
+//	for (uint32_t i=0;i<config.matDims;++i) {
+//		putchar('|');
+//		for(uint32_t j=0; j<config.matDims; j++)
 //		{
-//			for(k=0; k<columnFirst; ++k)
-//			{
-//				mult[i][j] += firstMatrix[i][k] * secondMatrix[k][j];
-//			}
+//			double val = cpu.LoadDouble(c[i*config.matDims + j]);
+//			putchar(' ');
+//			printf(" %.2f ", val);
+//			if (j==config.matDims-1 && val>=0)
+//				putchar(' ');
 //		}
+//		putchar('|');
+//		putchar('\n');
 //	}
 }
-
 
 static void daxpy (const CacheConfig& config) {
 	CPU cpu(config);
@@ -110,7 +154,7 @@ static void daxpy (const CacheConfig& config) {
 //		std::cout << cpu.LoadDouble(c[i]) << " ,";
 		assert(cpu.LoadDouble(c[i])==(cpu.LoadDouble(a[i])*r0 + cpu.LoadDouble(b[i])));
 	}
-	putchar('\n');
+//	putchar('\n');
 	if (config.logging) cpu.PrintStats();
 }
 

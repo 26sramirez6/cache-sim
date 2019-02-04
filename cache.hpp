@@ -49,22 +49,22 @@ struct CacheConfig {
 		wordSize(sizeof(double)), ramSize(0),
 		ramBlockCount(0), totalWords(0), wordsPerBlock(0) {	};
 
-	void SetPolicy (char * policy) {
-		if (!strcmp(policy, "LRU")) {
+	void SetPolicy (char * _policy) {
+		if (!strcmp(_policy, "LRU")) {
 			this->policy = LRU;
-		} else if (!strcmp(policy, "FIFO")) {
+		} else if (!strcmp(_policy, "FIFO")) {
 			this->policy = FIFO;
-		} else if (!strcmp(policy, "random")) {
+		} else if (!strcmp(_policy, "random")) {
 			this->policy = Random;
 		}
 	}
 
-	void SetAlgo (char * algo) {
-		if (!strcmp(algo, "daxpy")) {
+	void SetAlgo (char * _algo) {
+		if (!strcmp(_algo, "daxpy")) {
 			this->algo = daxpy;
-		} else if (!strcmp(algo, "mxm")) {
+		} else if (!strcmp(_algo, "mxm")) {
 			this->algo = mxm;
-		} else if (!strcmp(algo, "mxm_blocking")) {
+		} else if (!strcmp(_algo, "mxm_blocking")) {
 			this->algo = mxm_blocking;
 		}
 	}
@@ -113,6 +113,8 @@ struct CacheConfig {
 		case Random:
 			p = "Random";
 			break;
+		default:
+			break;
 		}
 		std::cout << "Replacement Policy: " << p << std::endl;
 
@@ -126,6 +128,8 @@ struct CacheConfig {
 			break;
 		case mxm_blocking:
 			a = "mxm_blocking";
+			break;
+		default:
 			break;
 		}
 
