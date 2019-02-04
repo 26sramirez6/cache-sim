@@ -87,7 +87,7 @@ struct CacheConfig {
 
 class Address {
 private:
-	const uint32_t address_;
+
 
 	// field sizes in bits statically stored
 	// once cache size is known
@@ -116,7 +116,7 @@ private:
 	static uint32_t tagShift_;
 	static uint32_t ramBlockShift_;
 public:
-
+	const uint32_t address_;
 #ifndef NDEBUG
 	Address(uint32_t address) : address_(address) {	this->Assert();	}
 #else
@@ -227,15 +227,24 @@ class DataBlock {
 private:
 	static uint32_t size_;
 	static uint32_t numWords_;
-	std::vector<double> data_;
+
 public:
-
-	DataBlock() : data_(size_) { assert(this->size_!=0); }
-
+	std::vector<double> data_;
+	DataBlock() : data_(numWords_) { assert(this->size_!=0); }
+	~DataBlock() { }
+	DataBlock(DataBlock&& other) : data_(other.data_) {}
 	DataBlock(const DataBlock &db2) : data_(db2.data_) { }
+	DataBlock& operator=(const DataBlock& other) = default;
+	DataBlock& operator=(DataBlock&& other) = default;
 
 	double GetWord(const uint32_t offset) const { return this->data_[offset]; }
-	void SetWord(const uint32_t offset, const double value) { this->data_[offset] = value; }
+	void SetWord(const uint32_t offset, const double value) {
+		if (this->data_.size() > 8) {
+			std::cout << "offset: " << offset << std::endl;
+			std::cout << "size: " << data_.size() << std::endl;
+		}
+		this->data_[offset] = value;
+	}
 
 	static void StaticInit(const CacheConfig& config) {
 		DataBlock::size_ = config.blockSize;
@@ -268,9 +277,14 @@ public:
 };
 
 struct CacheLine {
-	DataBlock& dataBlock_;
+	DataBlock dataBlock_;
 	const uint32_t tag_;
-	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(dataBlock), tag_(tag) {}
+	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(std::move(dataBlock)), tag_(tag) {	}
+	CacheLine(const CacheLine& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) { }
+	CacheLine(CacheLine&& other) : dataBlock_(std::move(other.dataBlock_)), tag_(other.tag_) { }
+	CacheLine& operator=(const CacheLine& other) = default;
+	CacheLine& operator=(CacheLine&& other) = default;
+	~CacheLine() { }
 };
 
 class Cache {
@@ -301,13 +315,6 @@ protected:
 		whits_(0), wmisses_(0), ram_(ram), blocks_(config.numSets), maps_(config.numSets) {
 
 		srand (time(NULL));
-//		this->blocks_.resize(this->numSets_);
-//		for (auto it=this->blocks_.begin(); it!=this->blocks_.end(); ++it) {
-//			(*
-//		}
-//		this->valid_.resize(this->numSets_, std::vector<bool>(this->nWay_, false));
-//		this->tags_.resize(this->numSets_, std::vector<uint32_t>(this->nWay_));
-//		this->maps_.resize(this->numSets_);
 	}
 
 public:
@@ -321,8 +328,6 @@ public:
 		uint32_t tag = address.GetTag();
 		std::list<CacheLine>& list = this->blocks_[setIndex];
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
-//		std::vector<bool>& valids = this->valid_[setIndex];
-//		std::vector<uint32_t>& tags = this->tags_[setIndex];
 
 		//O(1) search
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
@@ -336,18 +341,7 @@ public:
 			return hit->second->dataBlock_.GetWord(address.GetWord());
 		}
 
-		// cache search
-//		for (uint32_t i=0; i<this->nWay_; ++i) {
-////			std::cout<< (valids[i] && (tags[i]==tag)) << std::endl;
-//			if (valids[i] && (tags[i]==tag)) { // cache hit
-//				++this->rhits_;
-//				return list[i].GetWord(address.GetWord());
-//			}
-//		}
-
 		// cache miss: fetch from RAM.
-		// Note: copy constructor is called.
-		// not a pointer to the one in RAM.
 		++this->rmisses_;
 
 		if (list.size() == this->nWay_) {
@@ -356,8 +350,12 @@ public:
 			list.pop_back();
 			map.erase(evicted.tag_);
 		}
-		DataBlock block = this->ram_.GetBlockCopy(address);
-		list.push_front(CacheLine(block, address.GetTag()));
+		// Note: copy constructor is called.
+		// a copied block from the one in RAM.
+		DataBlock block(this->ram_.GetBlockCopy(address));
+		// Note: this cacheline holds a reference
+		// to this the copied block
+		list.push_front(std::move(CacheLine(block, address.GetTag())));
 		// update the map with new block
 		map.insert({tag, list.begin()});
 		assert(list.size()<=this->nWay_);
@@ -370,51 +368,39 @@ public:
 		uint32_t wordIndex = address.GetWord();
 		std::list<CacheLine>& list = this->blocks_[setIndex];
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
-//		std::vector<bool>& valids = this->valid_[setIndex];
-//		std::vector<uint32_t>& tags = this->tags_[setIndex];
 
 		// write through + write allocate:
 		// RAM needs to be updated no matter what
 		this->ram_.SetWord(address, wordIndex, val);
 
-		// cache search
-//		for (uint32_t i=0; i<this->nWay_; ++i) {
-//			if (valids[i] && tags[i]==tag) { // cache hit
-//				set[i].SetWord(wordIndex, val);
-//				++this->whits_;
-//				return;
-//			}
-//		}
-
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
 		if (hit!=map.end()) { // cache hit
 			// move the hit to the front of the list
+			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
 			hit->second->dataBlock_.SetWord(wordIndex, val);
 			// move the hit to the front of the list
 			list.erase(hit->second);
-			list.push_front(*(hit->second));
-			assert(list.size()<=this->nWay_);
+			list.push_front(std::move(*(hit->second)));
 			return;
 		}
-
+		std::cout << "Cache miss" << std::endl;
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
 		if (list.size() == this->nWay_) {
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
+			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
 			map.erase(evicted.tag_);
 		}
 		DataBlock newBlock = this->ram_.GetBlockCopy(address);
-		list.push_front(CacheLine(newBlock, address.GetTag()));
+		CacheLine line(newBlock, address.GetTag());
+		list.push_front(std::move(line));
 		// update the map with new block
-		map.insert({tag, list.begin()});
+		map.insert({tag, std::move(list.begin())});
 		assert(list.size()<=this->nWay_);
 		return;
-
-//		this->Write(newBlock, setIndex);
-//		this->RandomWrite(newBlock, setIndex);
 	}
 
 	void PrintStats() const {
@@ -497,6 +483,7 @@ public:
 
 	void StoreDouble(Address& address, double value) {
 		this->cache_->SetDouble(address, value);
+		std::cout << "Successful store of address: " << address.address_ << " val: " << value << std::endl;
 	}
 
 	double AddDouble(double val1, double val2) const {

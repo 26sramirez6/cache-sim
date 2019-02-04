@@ -83,11 +83,96 @@ static void daxpy (const CacheConfig& config) {
 	cpu.PrintStats();
 }
 
+//struct B {
+//	std::vector<double> data;
+//	B() : data(100) { std::cout << "B constructor called" << std::endl;}
+//	B(const B &other) : data(other.data) {
+//		std::cout << "B copy ctor called\n";
+//	}
+//
+//	B(B &&other) : data(std::move(other.data)) {
+//		std::cout << "B move ctor called\n";
+//	}
+//
+//	~B() {std::cout<<"B destructor called" << std::endl;}
+//};
+//
+//struct A {
+//	std::vector<B> data;
+//	A() : data(100) {
+//		std::cout << "Constructing A\n";
+//	}
+//	B TestCopy(int index) {
+//		return data[index];
+//	}
+//};
+//
+//struct C {
+//	B block;
+//	int x;
+////	C(B b) : block(std::move(b)) {
+////		x = 4;
+////		std::cout << "C constructor called." << std::endl;
+////	}
+//
+//	C(B& b) : block(std::move(b)) {
+//		x = 4;
+//		std::cout << "C special constructor called." << std::endl;
+//	}
+//
+//	C(const C &other): block(other.block), x(other.x) {
+//		std::cout << "C copy ctor called\n";
+////		block.data = other.block.data;
+////		std::cout << other.block.data[0] << std::endl;
+////		std::cout << block.data[0] << std::endl;
+//	}
+//
+//	C(C &&other) : block(std::move(other.block)), x(other.x) {
+//		std::cout << "C move ctr called." << std::endl;
+//	}
+//
+//	~C() {std::cout<<"C destructor called" << std::endl;}
+//};
+//
+//
+//static void func(std::vector<C>& vec) {
+//	B b;
+//	b.data[0] = 88;
+//
+//	C c(b);
+////	c.x = 19;
+//	std::cout << "push back" << std::endl;
+//	vec.push_back(std::move(c));
+//}
+//
+//static void read(std::vector<C>& vec) {
+//	std::cout<<vec[0].x<<std::endl;
+//	std::cout<<vec[0].block.data[0]<<std::endl;
+//}
+
 int main (int argc, char ** argv) {
+//	std::vector<C> test;
+//	func(test);
+//	read(test);
+//	A a;
+//	B b(a.TestCopy(10));
+//	C c(b);
+//	std::cout << "address of b: " << &b << std::endl;
+//	std::cout << "address of c block: " << &(c.block) << std::endl;
+//	if (&b==&(c.block)) std::cout << "b equal to c" << std::endl;
 
 	CacheConfig c;
+//	CPU cpu(c);
+//	Address(0);
+//	Address(1);
+//	Address(2);
+//	Address(3);
+//	Address(4);
+//	Address(5);
+
 	BuildConfiguration(c, argc, argv);
 	daxpy(c);
+
 	std::cout << "cache-sim terminating\n";
 	return EXIT_SUCCESS;
 }
