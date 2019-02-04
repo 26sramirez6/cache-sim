@@ -336,7 +336,7 @@ public:
 		if (hit!=map.end()) { // cache hit
 			++this->rhits_;
 			// move the hit to the front of the list
-			CacheLine cl(std::move(*(hit->second)));
+			CacheLine cl(*(hit->second));
 			list.erase(hit->second);
 			list.push_front(cl);
 			//list.splice( list.begin(), list, hit->second );
@@ -381,13 +381,13 @@ public:
 			// move the hit to the front of the list
 //			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
-			CacheLine cl(std::move(*(hit->second)));
+			CacheLine cl(*(hit->second));
 			cl.dataBlock_.SetWord(wordIndex, val);
 
 			// move the hit to the front of the list
 			list.erase(hit->second);
 
-			list.push_front(std::move(cl));
+			list.push_front(cl);
 //			std::cout << "Moved to front" << std::endl;
 //			std::cout << "List size: " << list.size() << std::endl;
 			return;
