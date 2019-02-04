@@ -61,13 +61,13 @@ struct CacheConfig {
 		}
 
 		if (this->algo=="mxm_block" || this->algo=="mxm") {
-			this->ramSize += this->matDims*this->matDims*this->wordSize*3;
+			this->ramSize += this->matDims*this->matDims*this->wordSize*MATS;
 		} else {
-			this->ramSize += this->matDims*this->wordSize*3;
+			this->ramSize += this->matDims*this->wordSize*MATS;
 		}
 		this->ramSize += (this->ramSize%blockSize);
 		this->ramBlockCount = this->ramSize / this->blockSize;
-		this->totalWords = this->ramBlockCount * this->wordsPerBlock * MATS;
+		this->totalWords = this->ramBlockCount * this->wordsPerBlock;
 	}
 
 	void PrintStats() const {
@@ -76,12 +76,14 @@ struct CacheConfig {
 		std::cout << "Cache Size: " << this->cacheSize << std::endl;
 		std::cout << "Block Size: " << this->blockSize << std::endl;
 		std::cout << "Total Blocks in Cache: " << this->cacheBlockCount << std::endl;
+		std::cout << "Total Blocks in RAM: " << this->ramBlockCount << std::endl;
 		std::cout << "Associativity: " << this->nWay << std::endl;
 		std::cout << "Number of Sets: " << this->numSets << std::endl;
 		std::cout << "Replacement Policy: " << this->policy << std::endl;
 		std::cout << "Algorithm: " << this->algo << std::endl;
 		std::cout << "MXM Blocking Factor: " << this->blockFactor << std::endl;
 		std::cout << "Matrix or Vector dimension: " << this->matDims << std::endl;
+		std::cout << "Total Words: " << this->totalWords << std::endl;
 	}
 };
 
@@ -232,17 +234,13 @@ public:
 	std::vector<double> data_;
 	DataBlock() : data_(numWords_) { assert(this->size_!=0); }
 	~DataBlock() { }
-	DataBlock(DataBlock&& other) : data_(other.data_) {}
-	DataBlock(const DataBlock &db2) : data_(db2.data_) { }
+	DataBlock(DataBlock&& other) : data_(std::move(other.data_)) {}
+	DataBlock(const DataBlock &other) : data_(other.data_) { }
 	DataBlock& operator=(const DataBlock& other) = default;
 	DataBlock& operator=(DataBlock&& other) = default;
 
 	double GetWord(const uint32_t offset) const { return this->data_[offset]; }
 	void SetWord(const uint32_t offset, const double value) {
-		if (this->data_.size() > 8) {
-			std::cout << "offset: " << offset << std::endl;
-			std::cout << "size: " << data_.size() << std::endl;
-		}
 		this->data_[offset] = value;
 	}
 
@@ -280,8 +278,12 @@ struct CacheLine {
 	DataBlock dataBlock_;
 	const uint32_t tag_;
 	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(std::move(dataBlock)), tag_(tag) {	}
-	CacheLine(const CacheLine& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) { }
-	CacheLine(CacheLine&& other) : dataBlock_(std::move(other.dataBlock_)), tag_(other.tag_) { }
+	CacheLine(const CacheLine& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {
+//		std::cout << "CacheLine copy ctr called" << std::endl;
+	}
+	CacheLine(CacheLine&& other) : dataBlock_(std::move(other.dataBlock_)), tag_(other.tag_) {
+//		std::cout << "CacheLine move ctr called" << std::endl;
+	}
 	CacheLine& operator=(const CacheLine& other) = default;
 	CacheLine& operator=(CacheLine&& other) = default;
 	~CacheLine() { }
@@ -334,11 +336,11 @@ public:
 		if (hit!=map.end()) { // cache hit
 			++this->rhits_;
 			// move the hit to the front of the list
+			CacheLine cl(std::move(*(hit->second)));
 			list.erase(hit->second);
-			list.push_front(*(hit->second));
+			list.push_front(cl);
 			//list.splice( list.begin(), list, hit->second );
-			assert(list.size()<=this->nWay_);
-			return hit->second->dataBlock_.GetWord(address.GetWord());
+			return cl.dataBlock_.GetWord(address.GetWord());
 		}
 
 		// cache miss: fetch from RAM.
@@ -352,14 +354,14 @@ public:
 		}
 		// Note: copy constructor is called.
 		// a copied block from the one in RAM.
-		DataBlock block(this->ram_.GetBlockCopy(address));
+		DataBlock newBlock = this->ram_.GetBlockCopy(address);
 		// Note: this cacheline holds a reference
 		// to this the copied block
-		list.push_front(std::move(CacheLine(block, address.GetTag())));
+		CacheLine line(newBlock, address.GetTag());
+		list.push_front(line);
 		// update the map with new block
 		map.insert({tag, list.begin()});
-		assert(list.size()<=this->nWay_);
-		return block.GetWord(address.GetWord());
+		return line.dataBlock_.GetWord(address.GetWord());
 	}
 
 	void SetDouble(const Address& address, const double val) {
@@ -367,6 +369,7 @@ public:
 		uint32_t tag = address.GetTag();
 		uint32_t wordIndex = address.GetWord();
 		std::list<CacheLine>& list = this->blocks_[setIndex];
+		assert(list.size() <= this->nWay_);
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>& map = this->maps_[setIndex];
 
 		// write through + write allocate:
@@ -376,29 +379,34 @@ public:
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
 		if (hit!=map.end()) { // cache hit
 			// move the hit to the front of the list
-			std::cout << "Cache hit" << std::endl;
+//			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
-			hit->second->dataBlock_.SetWord(wordIndex, val);
+			CacheLine cl(std::move(*(hit->second)));
+			cl.dataBlock_.SetWord(wordIndex, val);
+
 			// move the hit to the front of the list
 			list.erase(hit->second);
-			list.push_front(std::move(*(hit->second)));
+
+			list.push_front(std::move(cl));
+//			std::cout << "Moved to front" << std::endl;
+//			std::cout << "List size: " << list.size() << std::endl;
 			return;
 		}
-		std::cout << "Cache miss" << std::endl;
+//		std::cout << "Cache miss" << std::endl;
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
 		if (list.size() == this->nWay_) {
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
-			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
+			//std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
 			map.erase(evicted.tag_);
 		}
 		DataBlock newBlock = this->ram_.GetBlockCopy(address);
 		CacheLine line(newBlock, address.GetTag());
-		list.push_front(std::move(line));
+		list.push_front(line);
 		// update the map with new block
-		map.insert({tag, std::move(list.begin())});
+		map.insert({tag, list.begin()});
 		assert(list.size()<=this->nWay_);
 		return;
 	}
@@ -483,7 +491,7 @@ public:
 
 	void StoreDouble(Address& address, double value) {
 		this->cache_->SetDouble(address, value);
-		std::cout << "Successful store of address: " << address.address_ << " val: " << value << std::endl;
+//		std::cout << "Successful store of address: " << address.address_ << " val: " << value << std::endl;
 	}
 
 	double AddDouble(double val1, double val2) const {
