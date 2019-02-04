@@ -31,7 +31,7 @@ struct CacheConfig {
 	uint32_t blockFactor;
 	uint32_t cacheBlockCount;
 	uint32_t numSets;
-	bool logging;
+	bool printSolution;
 	enum Policy { LRU, FIFO, Random };
 	enum Algo { daxpy, mxm, mxm_blocking };
 	Policy policy;
@@ -41,13 +41,15 @@ struct CacheConfig {
 	uint32_t ramBlockCount;
 	uint32_t totalWords;
 	uint32_t wordsPerBlock;
+	bool runTests;
 
 	CacheConfig(): nWay(2), cacheSize(65536),
 		blockSize(64), matDims(480),
 		blockFactor(32), cacheBlockCount(0), numSets(0),
-		logging(false), policy(LRU), algo(mxm_blocking),
+		printSolution(false), policy(LRU), algo(mxm_blocking),
 		wordSize(sizeof(double)), ramSize(0),
-		ramBlockCount(0), totalWords(0), wordsPerBlock(0) {	};
+		ramBlockCount(0), totalWords(0), wordsPerBlock(0),
+		runTests(false) {};
 
 	void SetPolicy (char * _policy) {
 		if (!strcmp(_policy, "LRU")) {
@@ -90,6 +92,11 @@ struct CacheConfig {
 		this->ramSize += (this->ramSize%blockSize);
 		this->ramBlockCount = this->ramSize / this->blockSize;
 		this->totalWords = this->ramBlockCount * this->wordsPerBlock;
+		// the block factor can't be greater than the size of the individual matrices
+		if (this->algo==mxm_blocking) {
+			assert(this->blockFactor<=this->totalWords/MATS);
+			assert(this->matDims%this->blockFactor==0);
+		}
 	}
 
 	void PrintStats() const {
