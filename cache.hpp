@@ -4,7 +4,7 @@
 #include <bitset>
 #include <list>
 #include <unordered_map>
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 #include <time.h>
 #include <stdlib.h>
@@ -374,12 +374,8 @@ protected:
 
 	RAM & ram_;
 
-//	Policy policy_;
 	std::vector< std::list<CacheLine> > blocks_;
-//	std::vector< std::vector<bool> > valid_;
-//	std::vector< std::vector<uint32_t> > tags_;
 	std::vector< std::unordered_map<uint32_t, std::list<CacheLine>::iterator> > maps_;
-//	virtual void Write(const DataBlock& block, const uint32_t setIndex) = 0;
 
 	Cache(const CacheConfig& config, RAM& ram) :
 		nWay_(config.nWay), cacheSize_(config.cacheSize),
@@ -453,7 +449,11 @@ public:
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
 			list.pop_back();
+#ifdef NDEBUG
+			map.erase(evicted.tag_);
+#else
 			int ret = map.erase(evicted.tag_);
+#endif
 			assert(ret==1);
 			assert(map.count(evicted.tag_)==0);
 		}
@@ -511,7 +511,11 @@ public:
 			CacheLine& evicted = list.back();
 //			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
+#ifdef NDEBUG
+			map.erase(evicted.tag_);
+#else
 			int ret = map.erase(evicted.tag_);
+#endif
 			assert(ret==1);
 			assert(map.count(evicted.tag_)==0);
 		}
@@ -531,10 +535,6 @@ class FIFOCache : public Cache {
 public:
 	FIFOCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
 private:
-	void Write(const DataBlock& block, const uint32_t setIndex) {
-
-	}
-
 	void SetDouble(const Address& address, const double val) {
 		uint32_t setIndex = address.GetSet();
 		uint32_t tag = address.GetTag();
@@ -567,7 +567,11 @@ private:
 			CacheLine& evicted = list.back();
 //			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
+#ifdef NDEBUG
+			map.erase(evicted.tag_);
+#else
 			int ret = map.erase(evicted.tag_);
+#endif
 			assert(ret==1);
 			assert(map.count(evicted.tag_)==0);
 		}
@@ -606,7 +610,11 @@ private:
 			// need to evict back of list (FIFO)
 			CacheLine& evicted = list.back();
 			list.pop_back();
+#ifdef NDEBUG
+			map.erase(evicted.tag_);
+#else
 			int ret = map.erase(evicted.tag_);
+#endif
 			assert(ret==1);
 			assert(map.count(evicted.tag_)==0);
 		}
@@ -626,12 +634,6 @@ class RandomCache : public Cache {
 public:
 	RandomCache(const CacheConfig& config, RAM& ram) : Cache(config, ram) {};
 private:
-	void Write(const DataBlock& block, const uint32_t setIndex) {
-		// randomly evict a block by overwrite
-//		int evict = rand()%this->nWay_;
-//		this->blocks_[setIndex][evict] = block;
-//		this->valid_[setIndex][evict] = true;
-	}
 
 	void SetDouble(const Address& address, const double val) {
 		uint32_t setIndex = address.GetSet();
@@ -666,7 +668,11 @@ private:
 			for (uint32_t i=0; i<rand()%this->nWay_; ++i) ++it;
 			CacheLine& evicted = *it;
 			list.erase(it);
+#ifdef NDEBUG
+			map.erase(evicted.tag_);
+#else
 			int ret = map.erase(evicted.tag_);
+#endif
 			assert(ret==1);
 			assert(map.count(evicted.tag_)==0);
 		}
@@ -707,7 +713,11 @@ private:
 			for (uint32_t i=0; i<rand()%this->nWay_; ++i) ++it;
 			CacheLine& evicted = *it;
 			list.erase(it);
+#ifdef NDEBUG
+			map.erase(evicted.tag_);
+#else
 			int ret = map.erase(evicted.tag_);
+#endif
 			assert(ret==1);
 			assert(map.count(evicted.tag_)==0);
 		}

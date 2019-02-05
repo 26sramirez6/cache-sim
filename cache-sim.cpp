@@ -63,7 +63,6 @@ static void mxm_blocking (const CacheConfig& config) {
 		cpu.StoreDouble(c[i], 0.);
 	}
 
-	std::cout << config.blockFactor << std::endl;
 	for (uint32_t sj=0; sj<config.matDims; sj+=config.blockFactor) {
 		for (uint32_t si=0; si<config.matDims; si+=config.blockFactor) {
 			for (uint32_t sk=0; sk<config.matDims; sk+=config.blockFactor) {
