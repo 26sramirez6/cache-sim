@@ -345,23 +345,21 @@ public:
 	}
 };
 
-struct CacheLine {
-	DataBlock dataBlock_;
-	const uint32_t tag_;
-	CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(dataBlock), tag_(tag) {	}
-	CacheLine(const CacheLine& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {
-//		std::cout << "CacheLine copy ctr called" << std::endl;
-	}
-	CacheLine(CacheLine&& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {
-//		std::cout << "CacheLine move ctr called" << std::endl;
-	}
-	CacheLine& operator=(const CacheLine& other) = default;
-	CacheLine& operator=(CacheLine&& other) = default;
-	~CacheLine() { }
-};
 
 class Cache {
 protected:
+
+	struct CacheLine {
+		DataBlock dataBlock_;
+		const uint32_t tag_;
+		CacheLine(DataBlock& dataBlock, const uint32_t tag) : dataBlock_(dataBlock), tag_(tag) {}
+		CacheLine(const CacheLine& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {}
+		CacheLine(CacheLine&& other) : dataBlock_(other.dataBlock_), tag_(other.tag_) {}
+		CacheLine& operator=(const CacheLine& other) = default;
+		CacheLine& operator=(CacheLine&& other) = default;
+		~CacheLine() { }
+	};
+
 	const uint32_t nWay_;
 	const uint32_t cacheSize_;
 	const uint32_t blockSize_;
@@ -427,17 +425,10 @@ public:
 			++this->rhits_;
 			// move the hit to the front of the list
 			CacheLine cl(*(hit->second));
-//			std::cout << "iterator word: " <<hit->second->dataBlock_.GetWord(address.GetWord())<<std::endl;
 			list.erase(hit->second);
 			list.push_front(cl);
 			// update the stored iterator
 			map[tag] = list.begin();
-			//list.splice( list.begin(), list, hit->second );
-//			std::cout << "ram word: " << this->ram_.blocks_[address.GetRamBlock()].GetWord(address.GetWord()) << std::endl;
-//			std::cout << "cache word: " << cl.dataBlock_.GetWord(address.GetWord()) << std::endl;
-//			for (auto& t : map)
-//			    std::cout << t.first << ", " << t.second->dataBlock_.GetWord(address.GetWord()) << "\n";
-
 			assert(this->ram_.blocks_[address.GetRamBlock()].GetWord(address.GetWord())==cl.dataBlock_.GetWord(address.GetWord()));
 			return cl.dataBlock_.GetWord(address.GetWord());
 		}
@@ -463,7 +454,8 @@ public:
 		// Note: this cacheline holds a reference
 		// to this the copied block
 		CacheLine line(newBlock, address.GetTag());
-		assert(line.dataBlock_.GetWord(address.GetWord())==newBlock.GetWord(address.GetWord()));
+		assert(line.dataBlock_.GetWord(address.GetWord())
+				==newBlock.GetWord(address.GetWord()));
 		list.push_front(line);
 		// update the map with new block
 		map[tag] = list.begin();
@@ -485,31 +477,21 @@ public:
 		std::unordered_map<uint32_t, std::list<CacheLine>::iterator>::const_iterator hit = map.find(tag);
 		if (hit!=map.end()) { // cache hit
 			// move the hit to the front of the list
-//			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
 			CacheLine cl(*(hit->second));
-//			std::cout << "Datablock size in CL : " << cl.dataBlock_.data_.size() << std::endl;
-//			std::cout << "word index in Datablock : " << wordIndex << std::endl;
 			cl.dataBlock_.SetWord(wordIndex, val);
 			assert(cl.dataBlock_.GetWord(address.GetWord())==val);
-//			std::cout << "successful word set. verifying list size: " << list.size() << std::endl;
 			// move the hit to the front of the list
-
 			list.erase(hit->second);
-//			printf("successful erase\n");
 			list.push_front(cl);
 			map[tag] = list.begin();
-//			std::cout << "Moved to cache line to front. List size :" << list.size() << std::endl;
 			return;
 		}
-//		std::cout << "Cache miss" << std::endl;
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
-//		std::cout << "Checking list size: " <<list.size()<< "vs. nway: "<<this->nWay_ <<std::endl;
 		if (list.size() == this->nWay_) {
 			// need to evict back of list (LRU)
 			CacheLine& evicted = list.back();
-//			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
 #ifdef NDEBUG
 			map.erase(evicted.tag_);
@@ -551,21 +533,17 @@ private:
 		// **** CACHE HIT ****
 		if (hit!=map.end()) {
 			// dont bother reordering the queue since its FIFO
-//			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
 			hit->second->dataBlock_.SetWord(wordIndex, val);
 			assert(hit->second->dataBlock_.GetWord(wordIndex)==val);
 			return;
 		}
-//		std::cout << "Cache miss" << std::endl;
 		// **** CACHE MISS ****
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
-//		std::cout << "Checking list size: " <<list.size()<< "vs. nway: "<<this->nWay_ <<std::endl;
 		if (list.size() == this->nWay_) {
 			// need to evict back of list (FIFO)
 			CacheLine& evicted = list.back();
-//			std::cout << "Evicting block " << &evicted.dataBlock_ << std::endl;
 			list.pop_back();
 #ifdef NDEBUG
 			map.erase(evicted.tag_);
@@ -651,17 +629,14 @@ private:
 		// **** CACHE HIT ****
 		if (hit!=map.end()) {
 			// dont bother reordering the queue since its FIFO
-//			std::cout << "Cache hit" << std::endl;
 			++this->whits_;
 			hit->second->dataBlock_.SetWord(wordIndex, val);
 			assert(hit->second->dataBlock_.GetWord(wordIndex)==val);
 			return;
 		}
-//		std::cout << "Cache miss" << std::endl;
 		// **** CACHE MISS ****
 		// cache miss, bring in the new block from ram
 		++this->wmisses_;
-//		std::cout << "Checking list size: " <<list.size()<< "vs. nway: "<<this->nWay_ <<std::endl;
 		if (list.size() == this->nWay_) {
 			// evict block at random
 			std::list<CacheLine>::iterator it = list.begin();
